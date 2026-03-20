@@ -17,7 +17,7 @@ export class AppController {
 
   @Get('ping-auth')
   @UseGuards(JwtAuthGuard)
-  pingAuth(@Req() req) {
+  pingAuth(@Req() req: any) {
     return { status: 'El token funciona perfectamente!', user: req.user };
   }
 }

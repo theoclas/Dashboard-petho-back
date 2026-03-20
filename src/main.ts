@@ -32,6 +32,14 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
+  
+  // Aumentar el timeout del servidor a 30 minutos (1800000 ms)
+  // para permitir cargas largas de archivos
+  const server = app.getHttpServer();
+  server.setTimeout(1800000);
+  server.keepAliveTimeout = 1800000;
+  server.headersTimeout = 1801000;
+
   console.log(`🚀 Petho API corriendo en http://localhost:${port}/api`);
 }
 bootstrap();

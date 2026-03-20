@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.vscode/
+.idea/
+coverage/
+*.txt
+import_test.js
+read_columns.js
+validate_db.js

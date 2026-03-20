@@ -425,36 +425,60 @@ export class ImportService {
     buffer: Buffer,
   ): Promise<{ imported: number; errors: string[] }> {
     const wb = XLSX.read(buffer, { type: 'buffer' });
-    const sheetName = wb.SheetNames[0];
+    const sheetName = wb.SheetNames.find((s) => s.toLowerCase().includes('mapeo')) || wb.SheetNames[0];
     const ws = wb.Sheets[sheetName];
 
     if (!ws) throw new BadRequestException('No se encontró la hoja en el archivo Excel');
 
-    const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, {
+    const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
       defval: null,
     });
 
-    this.logger.log(`Procesando ${rows.length} filas de Mapeo de Estados...`);
+    this.logger.log(`Procesando filas crudas de Mapeo de Estados...`);
 
+    let headerRowIndex = -1;
+    for (let i = 0; i < Math.min(20, rawRows.length); i++) {
+      const row = rawRows[i];
+      if (Array.isArray(row) && row.some(cell => typeof cell === 'string' && cell.toLowerCase().includes('estatus_original'))) {
+        headerRowIndex = i;
+        break;
+      }
+    }
+
+    if (headerRowIndex === -1) {
+      throw new BadRequestException('No se encontró la columna "estatus_original" en las primeras filas del Excel');
+    }
+
+    const headers = rawRows[headerRowIndex].map(h => (h ? String(h).toLowerCase().trim() : ''));
+    
     const errors: string[] = [];
     const records = [];
 
-    for (const row of rows) {
+    for (let i = headerRowIndex + 1; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      if (!Array.isArray(row) || row.length === 0 || row.every(cell => cell === null || cell === '')) continue;
+
       try {
-        const estatusOriginal = this.toString(row['ESTATUS ORIGINAL']) || this.toString(row['ESTATUS']);
+        const getVal = (colNameMatches: string[]) => {
+          const index = headers.findIndex(h => colNameMatches.some(m => h.includes(m)));
+          return index !== -1 ? this.toString(row[index]) : undefined;
+        };
+
+        const estatusOriginal = getVal(['estatus_original', 'estatus original', 'estatus original']);
         if (!estatusOriginal) continue;
 
         const record = {
-          transportadora: this.toString(row['TRANSPORTADORA']) || '',
+          transportadora: getVal(['transportadora']) || '',
           estatus_original: estatusOriginal,
-          ultimo_movimiento: this.toString(row['ÚLTIMO MOVIMIENTO']) || this.toString(row['ULTIMO MOVIMIENTO']) || '',
-          estado_unificado: this.toString(row['ESTADO UNIFICADO']) || 'SIN MAPEAR',
+          ultimo_movimiento: getVal(['ultimo_movimiento', 'último movimiento', 'ultimo movimiento']) || '',
+          estado_unificado: getVal(['estado_unificado', 'estado unificado']) || 'SIN MAPEAR',
         };
 
         records.push(record);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Error en fila: ${msg}`);
+        errors.push(`Error en fila ${i + 1}: ${msg}`);
       }
     }
 

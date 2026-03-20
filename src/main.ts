@@ -15,6 +15,7 @@ async function bootstrap() {
   app.enableCors({
     origin: true,
     credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'Accept'],
   });
   
   // Prefijo global de API

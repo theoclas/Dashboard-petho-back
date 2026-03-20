@@ -264,4 +264,41 @@ export class PedidosService {
     }
     return count;
   }
+
+  /**
+   * OPTIMIZADO: Upsert masivo en lotes de 500 filas usando
+   * INSERT ... ON CONFLICT (id_dropi) DO UPDATE.
+   * De N roundtrips a la BD → ceil(N/500) roundtrips.
+   */
+  async bulkUpsertRaw(records: Partial<Pedido>[]): Promise<number> {
+    if (!records.length) return 0;
+
+    const BATCH_SIZE = 500;
+    let total = 0;
+
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const batch = records.slice(i, i + BATCH_SIZE);
+      await this.pedidoRepository
+        .createQueryBuilder()
+        .insert()
+        .into(Pedido)
+        .values(batch as Pedido[])
+        .orUpdate(
+          [
+            'fecha', 'cliente', 'transportadora', 'estado_operativo', 'guia',
+            'departamento', 'ciudad', 'direccion', 'telefono', 'notas',
+            'venta', 'ganancia_calc', 'flete', 'costo_devolucion_estimado',
+            'costo_proveedor', 'estatus_original', 'ultimo_mov', 'fecha_ult_mov',
+            'hora_ult_mov', 'dias_desde_ult_mov', 'estado_unificado',
+            'cartera', 'cartera_aplicada', 'estado_cartera',
+          ],
+          ['id_dropi'],
+        )
+        .execute();
+      total += batch.length;
+    }
+
+    return total;
+  }
 }
+

@@ -12,7 +12,7 @@ export class Pedido {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Index()
+  @Index({ unique: true })
   @Column({ type: 'varchar', length: 50, nullable: true })
   id_dropi: string;
 

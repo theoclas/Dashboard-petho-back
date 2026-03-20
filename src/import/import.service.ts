@@ -418,6 +418,55 @@ export class ImportService {
   }
 
 
+  /**
+   * Importa el archivo de MAPEO DE ESTADOS.
+   */
+  async importMapeoEstados(
+    buffer: Buffer,
+  ): Promise<{ imported: number; errors: string[] }> {
+    const wb = XLSX.read(buffer, { type: 'buffer' });
+    const sheetName = wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+
+    if (!ws) throw new BadRequestException('No se encontró la hoja en el archivo Excel');
+
+    const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, {
+      defval: null,
+    });
+
+    this.logger.log(`Procesando ${rows.length} filas de Mapeo de Estados...`);
+
+    const errors: string[] = [];
+    const records = [];
+
+    for (const row of rows) {
+      try {
+        const estatusOriginal = this.toString(row['ESTATUS ORIGINAL']) || this.toString(row['ESTATUS']);
+        if (!estatusOriginal) continue;
+
+        const record = {
+          transportadora: this.toString(row['TRANSPORTADORA']) || '',
+          estatus_original: estatusOriginal,
+          ultimo_movimiento: this.toString(row['ÚLTIMO MOVIMIENTO']) || this.toString(row['ULTIMO MOVIMIENTO']) || '',
+          estado_unificado: this.toString(row['ESTADO UNIFICADO']) || 'SIN MAPEAR',
+        };
+
+        records.push(record);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`Error en fila: ${msg}`);
+      }
+    }
+
+    let imported = 0;
+    if (records.length > 0) {
+      imported = await this.mapeoEstadosService.bulkUpsert(records);
+    }
+
+    this.logger.log(`Mapeos importados: ${imported}. Errores: ${errors.length}`);
+    return { imported, errors };
+  }
+
   async remapearPedidos(): Promise<{ procesados: number; remapeados: number }> {
     const resolveEstadoEnMemoria = await this.getResolverEnMemoria();
     const result = await this.pedidosService.findAll({ estado_unificado: 'SIN MAPEAR', limit: 3000 });

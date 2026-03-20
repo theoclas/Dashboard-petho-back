@@ -55,6 +55,15 @@ export class ImportController {
     return this.importService.importCpa(file.buffer);
   }
 
+  @Post('mapeo-estados')
+  @UseInterceptors(FileInterceptor('file'))
+  async importMapeoEstados(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('Se requiere un archivo Excel (.xlsx)');
+    }
+    return this.importService.importMapeoEstados(file.buffer);
+  }
+
   @Post('remapear-estados')
   async remapearEstados() {
     return this.importService.remapearPedidos();

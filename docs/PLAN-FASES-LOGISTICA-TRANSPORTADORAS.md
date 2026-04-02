@@ -26,7 +26,19 @@ Documento de referencia para implementar en **Dashboard-Petho-back** las capacid
 | Fase 0 | Parcial: reglas de estado en código (`src/common/pedido-logistica-sql.ts`); sin inventario formal en BD. |
 | Fase 1 | **Hecha** — `GET /api/reportes-logistica/efectividad-transportadoras` |
 | Fase 2 | **Hecha** — `GET /api/reportes-logistica/comparativa-geografica` |
-| Fase 3 | Parcial — DTO + JWT; índices SQL documentados; `Logger` en errores; tests unit/e2e en `reportes-logistica.*`; MV/job nocturno pendiente si hace falta. |
+| Fase 3 | **Casi hecha** — DTO, JWT, índices sugeridos en doc, Logger, tests. Pendiente: **inventario `estado_unificado`**, **MV/job** solo si hay problemas de rendimiento. |
+
+---
+
+## 1.b Qué falta (resumen)
+
+| Pendiente | Tipo |
+|-----------|------|
+| **Inventariar** valores reales de `estado_unificado` en BD (query ad-hoc o script) y contrastar con [`pedido-logistica-sql.ts`](../src/common/pedido-logistica-sql.ts) | Datos / cobertura |
+| **Materialized view** o agregado nocturno si en producción hay timeouts con mucho volumen | Rendimiento |
+| Aplicar índices tras **`EXPLAIN ANALYZE`** en entorno real — [`sql-sugerencias/indices-reportes-pedidos.sql`](./sql-sugerencias/indices-reportes-pedidos.sql) | Rendimiento |
+| Decidir **roles** (mismo criterio que rentabilidad: quién ve reportes) | Producto / seguridad |
+| Bucket **“otros”** / métricas de cobertura si aparecen estados no clasificados | Producto (opcional) |
 
 ---
 
@@ -112,3 +124,11 @@ Endpoint sugerido:
 
 - Frontend: [Dashboard-petho-Front/docs/PLAN-FASES-UI-LOGISTICA.md](../../Dashboard-petho-Front/docs/PLAN-FASES-UI-LOGISTICA.md) (consumo de estos endpoints y maquetación).
 - Rentabilidad por producto (backend): [PLAN-FASES-RENTABILIDAD-POR-PRODUCTO.md](./PLAN-FASES-RENTABILIDAD-POR-PRODUCTO.md).
+
+---
+
+## 6. Changelog del documento
+
+| Fecha (aprox.) | Cambio |
+|----------------|--------|
+| 2026-04 | Sección “Qué falta”, estado Fase 3 afinado, enlaces a tests. |

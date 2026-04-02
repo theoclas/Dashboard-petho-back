@@ -35,7 +35,19 @@ Documento para implementar el endpoint (o endpoints) que alimentan la tabla **Re
 | Fase 1 | **Hecha** — `GET /api/reportes-rentabilidad/por-producto` |
 | Fase 2 | **Hecha** — backend (`sortBy` / `search` / `total`) + UI [`RentabilidadProductoPage.tsx`](../../Dashboard-petho-Front/src/pages/RentabilidadProductoPage.tsx) con orden y búsqueda server-side. |
 | Fase 3 | No aplica MVP sin paginación server-side (ya hay paginación). |
-| Fase 4 | Parcial — JWT; tests unitarios + e2e HTTP (mocks) en `*.spec.ts` / `test/reportes-*.e2e-spec.ts`; e2e contra API real opcional (`npm run test:e2e:live` + `E2E_*`). |
+| Fase 4 | **Casi hecha** — JWT, Logger, tests (unit + e2e mocks + live opcional). Pendiente: decisión de **roles** (quién ve el endpoint) y **checklist manual** / `EXPLAIN` en producción. |
+
+---
+
+## 1.b Qué falta (resumen)
+
+| Pendiente | Tipo |
+|-----------|------|
+| Alinear **RolesGuard** o política explícita (solo ADMIN vs OPERADOR) con negocio | Producto / seguridad |
+| Ejecutar **`EXPLAIN ANALYZE`** en staging/prod y aplicar índices de [`sql-sugerencias/indices-reportes-pedidos.sql`](./sql-sugerencias/indices-reportes-pedidos.sql) si aplica | Rendimiento |
+| Validación manual tipo **hoja de cálculo** (2–3 productos vs totales) — criterio Fase 0 | QA |
+| **Vista materializada** o job nocturno solo si aparecen timeouts | Escalado |
+| Endpoint “lista completa sin paginación” (Fase 3 opcional) | **No planificado** — ya hay paginación server-side |
 
 ---
 
@@ -85,12 +97,10 @@ Documento para implementar el endpoint (o endpoints) que alimentan la tabla **Re
 
 ### Fase 3 — MVP alternativo solo cliente (opcional, documentado)
 
-Si el volumen es bajo temporalmente:
+**Estado:** no aplica — el API y la UI ya usan **paginación y orden en servidor**. No se implementará endpoint “toda la lista” salvo requisito nuevo explícito.
 
-- [ ] Endpoint sin paginación que devuelve lista completa filtrada solo por fechas.
-- [ ] **Marcar en código como deprecated** cuando se active paginación server-side.
-
-**Nota:** el documento del frontend debe alinearse: tabla con sort/filter local vs controlado por API.
+- [~] Endpoint sin paginación — **descartado** para el MVP actual.
+- [~] Deprecated en código — **N/A** (no hay endpoint duplicado).
 
 ---
 
@@ -102,6 +112,8 @@ Si el volumen es bajo temporalmente:
 - [x] Tests automatizados — unit: [`reportes-rentabilidad.service.spec.ts`](../src/reportes-rentabilidad/reportes-rentabilidad.service.spec.ts); e2e: [`test/reportes-rentabilidad.e2e-spec.ts`](../test/reportes-rentabilidad.e2e-spec.ts); live opcional: [`test/reportes-api-live.e2e-spec.ts`](../test/reportes-api-live.e2e-spec.ts) (`E2E_BASE_URL`, `E2E_JWT`).
 
 **Criterio de hecho:** revisión de permisos y ausencia de fugas de datos.
+
+**Pendiente explícito:** revisar con negocio si **OPERADOR** debe seguir viendo este reporte igual que hoy (solo `JwtAuthGuard`).
 
 ---
 
@@ -119,3 +131,11 @@ Si el volumen es bajo temporalmente:
 
 - Frontend: [Dashboard-petho-Front/docs/PLAN-FASES-UI-RENTABILIDAD-PRODUCTO.md](../../Dashboard-petho-Front/docs/PLAN-FASES-UI-RENTABILIDAD-PRODUCTO.md).
 - Logística (estados): [PLAN-FASES-LOGISTICA-TRANSPORTADORAS.md](./PLAN-FASES-LOGISTICA-TRANSPORTADORAS.md).
+
+---
+
+## 6. Changelog del documento
+
+| Fecha (aprox.) | Cambio |
+|----------------|--------|
+| 2026-04 | Añadidos tests automatizados, sección “Qué falta”, Fase 3 marcada como N/A, pendiente roles. |

@@ -42,8 +42,57 @@ export class CpaService {
     return this.create(data as CreateCpaDto);
   }
 
-  findAll() {
-    return this.cpaRepository.find();
+  private readonly cpaSortableFields = [
+    'id',
+    'semana',
+    'fecha',
+    'producto',
+    'cuenta_publicitaria',
+    'gasto_publicidad',
+    'conversaciones',
+    'total_facturado',
+    'ganancia_promedio',
+    'ventas',
+    'ticket_promedio_producto',
+    'cpa',
+    'conversion_rate',
+    'costo_publicitario',
+    'rentabilidad',
+    'utilidad_aproximada',
+  ] as const;
+
+  async findAll(query?: {
+    producto?: string;
+    sortField?: string;
+    sortOrder?: 'ASC' | 'DESC';
+  }): Promise<Cpa[]> {
+    const qb = this.cpaRepository.createQueryBuilder('cpa');
+    if (query?.producto?.trim()) {
+      qb.andWhere('cpa.producto ILIKE :prod', {
+        prod: `%${query.producto.trim()}%`,
+      });
+    }
+    const sortField = query?.sortField || 'fecha';
+    const sortOrder = query?.sortOrder === 'ASC' ? 'ASC' : 'DESC';
+    const field = this.cpaSortableFields.includes(sortField as (typeof this.cpaSortableFields)[number])
+      ? `cpa.${sortField}`
+      : 'cpa.fecha';
+    qb.orderBy(field, sortOrder);
+    if (field !== 'cpa.id') {
+      qb.addOrderBy('cpa.id', 'DESC');
+    }
+    return qb.getMany();
+  }
+
+  /** Nombres de producto distintos en CPA (para filtros en UI). */
+  async getDistinctProductos(): Promise<string[]> {
+    const rows = await this.cpaRepository
+      .createQueryBuilder('cpa')
+      .select('DISTINCT TRIM(cpa.producto)', 'producto')
+      .where("cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''")
+      .orderBy('producto', 'ASC')
+      .getRawMany<{ producto: string }>();
+    return rows.map((r) => String(r.producto ?? '').trim()).filter(Boolean);
   }
 
   async findOne(id: number) {

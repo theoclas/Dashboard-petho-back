@@ -36,9 +36,18 @@ export class CpaController {
     return this.cpaService.getDashboardStats(startDate, endDate);
   }
 
+  @Get('distinct-productos')
+  getDistinctProductos() {
+    return this.cpaService.getDistinctProductos();
+  }
+
   @Get()
-  findAll() {
-    return this.cpaService.findAll();
+  findAll(
+    @Query('producto') producto?: string,
+    @Query('sortField') sortField?: string,
+    @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
+  ) {
+    return this.cpaService.findAll({ producto, sortField, sortOrder });
   }
 
   @Get(':id')

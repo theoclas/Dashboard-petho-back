@@ -1,10 +1,37 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import * as XLSX from 'xlsx';
 import { Pedido } from './entities/pedido.entity';
 import { CreatePedidoDto } from './dto/create-pedido.dto';
 import { UpdatePedidoDto } from './dto/update-pedido.dto';
 import { ProductosDetalleService } from '../productos-detalle/productos-detalle.service';
+
+/** Filtros y orden compartidos entre listado paginado y exportación Excel. */
+export type PedidoListQuery = {
+  estado_unificado?: string;
+  transportadora?: string;
+  ciudad?: string;
+  id_dropi?: string;
+  sortField?: string;
+  sortOrder?: 'ASC' | 'DESC';
+  startDate?: string;
+  endDate?: string;
+};
+
+const EXPORT_MAX_ROWS = 50_000;
+
+function fmtDateCell(d: Date | string | null | undefined): string {
+  if (d == null) return '';
+  const x = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(x.getTime())) return '';
+  return x.toISOString().slice(0, 10);
+}
+
+function numCell(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 @Injectable()
 export class PedidosService {
@@ -48,24 +75,13 @@ export class PedidosService {
     return this.pedidoRepository.save(pedido);
   }
 
-  async findAll(query?: {
-    estado_unificado?: string;
-    transportadora?: string;
-    ciudad?: string;
-    id_dropi?: string;
-    page?: number;
-    limit?: number;
-    sortField?: string;
-    sortOrder?: 'ASC' | 'DESC';
-    startDate?: string;
-    endDate?: string;
-  }): Promise<{ data: Pedido[]; total: number; page: number; limit: number }> {
-    const page = query?.page || 1;
-    const limit = query?.limit || 50;
-    const skip = (page - 1) * limit;
-
+  private createFilteredQueryBuilder(query?: PedidoListQuery): SelectQueryBuilder<Pedido> {
     const qb = this.pedidoRepository.createQueryBuilder('pedido');
+    this.applyPedidoFilters(qb, query);
+    return qb;
+  }
 
+  private applyPedidoFilters(qb: SelectQueryBuilder<Pedido>, query?: PedidoListQuery): void {
     if (query?.startDate && query?.endDate) {
       qb.andWhere('pedido.fecha BETWEEN :startDate AND :endDate', {
         startDate: new Date(query.startDate),
@@ -96,24 +112,105 @@ export class PedidosService {
         ciudad: `%${query.ciudad}%`,
       });
     }
+  }
 
+  private applyPedidoOrder(qb: SelectQueryBuilder<Pedido>, query?: PedidoListQuery): void {
     const sortField = query?.sortField || 'id';
     const sortOrder = query?.sortOrder || 'DESC';
-
-    const allowedFields = ['id', 'id_dropi', 'fecha', 'ciudad', 'transportadora', 'venta', 'ganancia_calc', 'flete', 'cartera'];
+    const allowedFields = [
+      'id',
+      'id_dropi',
+      'fecha',
+      'ciudad',
+      'transportadora',
+      'venta',
+      'ganancia_calc',
+      'flete',
+      'cartera',
+    ];
     const field = allowedFields.includes(sortField) ? `pedido.${sortField}` : 'pedido.id';
-
     qb.orderBy(field, sortOrder);
-    
     if (field !== 'pedido.id') {
       qb.addOrderBy('pedido.id', 'DESC');
     }
-    
+  }
+
+  async findAll(
+    query?: PedidoListQuery & { page?: number; limit?: number },
+  ): Promise<{ data: Pedido[]; total: number; page: number; limit: number }> {
+    const page = query?.page || 1;
+    const limit = query?.limit || 50;
+    const skip = (page - 1) * limit;
+
+    const qb = this.createFilteredQueryBuilder(query);
+    this.applyPedidoOrder(qb, query);
     qb.skip(skip).take(limit);
 
     const [data, total] = await qb.getManyAndCount();
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * Exporta a Excel los pedidos que cumplen los mismos filtros que el listado (sin paginación).
+   * Máximo {@link EXPORT_MAX_ROWS} filas; si hay más coincidencias, se trunca y el cliente puede leerlo en cabeceras HTTP.
+   */
+  async exportPedidosExcel(query?: PedidoListQuery): Promise<{
+    buffer: Buffer;
+    rowCount: number;
+    totalMatching: number;
+    truncated: boolean;
+  }> {
+    const countQb = this.createFilteredQueryBuilder(query);
+    const totalMatching = await countQb.getCount();
+
+    const qb = this.createFilteredQueryBuilder(query);
+    this.applyPedidoOrder(qb, query);
+    qb.take(EXPORT_MAX_ROWS);
+    const rows = await qb.getMany();
+
+    const truncated = totalMatching > EXPORT_MAX_ROWS;
+
+    const sheetRows = rows.map((p) => ({
+      'ID Dropi': p.id_dropi ?? '',
+      Fecha: fmtDateCell(p.fecha),
+      Cliente: p.cliente ?? '',
+      Teléfono: p.telefono ?? '',
+      Ciudad: p.ciudad ?? '',
+      Departamento: p.departamento ?? '',
+      Dirección: p.direccion ?? '',
+      Transportadora: p.transportadora ?? '',
+      Guía: p.guia ?? '',
+      'Estado operativo': p.estado_operativo ?? '',
+      'Estado unificado': p.estado_unificado ?? '',
+      Venta: numCell(p.venta),
+      Ganancia: numCell(p.ganancia_calc),
+      Flete: numCell(p.flete),
+      'Costo proveedor': numCell(p.costo_proveedor),
+      'Costo dev. estim.': numCell(p.costo_devolucion_estimado),
+      Cartera: numCell(p.cartera),
+      'Cartera aplicada': numCell(p.cartera_aplicada),
+      'Est. cartera': p.estado_cartera ?? '',
+      'Días últ. mov': p.dias_desde_ult_mov ?? '',
+      'Notas Dropi': p.notas ?? '',
+      'Mis notas': p.notas_manuales ?? '',
+      'Estado Dropi': p.estatus_original ?? '',
+      'Últ. mov. Dropi': p.ultimo_mov ?? '',
+      'Fecha últ. mov': fmtDateCell(p.fecha_ult_mov),
+      Producto: p.producto ?? '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(sheetRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Pedidos');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    return {
+      buffer,
+      rowCount: rows.length,
+      totalMatching,
+      truncated,
+    };
   }
 
   async getDashboardStats(startDate?: string, endDate?: string) {

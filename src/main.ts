@@ -16,6 +16,12 @@ async function bootstrap() {
     origin: true,
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'Accept'],
+    exposedHeaders: [
+      'X-Export-Row-Count',
+      'X-Export-Total-Matching',
+      'X-Export-Truncated',
+      'Content-Disposition',
+    ],
   });
   
   // Prefijo global de API

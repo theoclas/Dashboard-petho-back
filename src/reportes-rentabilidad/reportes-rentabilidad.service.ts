@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { pedidoBucketCaseSql } from '../common/pedido-logistica-sql';
-import { extractCalendarDateParam } from '../common/calendar-date-range';
+import {
+  extractCalendarDateParam,
+  sqlBusinessCalendarDate,
+} from '../common/calendar-date-range';
 import type { RentabilidadSortBy } from './dto/por-producto-query.dto';
 
 export interface RentabilidadProductoRow {
@@ -66,8 +69,10 @@ export class ReportesRentabilidadService {
     if (hasRange) {
       const d1 = push(desdeCal);
       const d2 = push(hastaCal);
-      dateCondPedido = `AND p.fecha::date >= ${d1}::date AND p.fecha::date <= ${d2}::date`;
-      dateCondCpa = `AND cpa.fecha::date >= ${d1}::date AND cpa.fecha::date <= ${d2}::date`;
+      const pDate = sqlBusinessCalendarDate('p.fecha');
+      const cpaDate = sqlBusinessCalendarDate('cpa.fecha');
+      dateCondPedido = `AND ${pDate} BETWEEN ${d1}::date AND ${d2}::date`;
+      dateCondCpa = `AND ${cpaDate} BETWEEN ${d1}::date AND ${d2}::date`;
     }
 
     const ilikePh = push(searchPattern);

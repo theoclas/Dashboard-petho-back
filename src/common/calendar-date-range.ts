@@ -16,9 +16,39 @@ export function extractCalendarDateParam(raw: string): string {
   return t.slice(0, 10);
 }
 
-/** Condición TypeORM: columna timestamp/date comparada por DATE inclusive. */
+function isValidIanaTimeZone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zona usada para interpretar qué “día calendario” tiene un `timestamp` (alineado con el front).
+ * Por defecto America/Bogota. Override: `DATE_RANGE_TZ=Europe/Madrid` en `.env`.
+ */
+export function getDateRangeTimeZone(): string {
+  const raw = (process.env.DATE_RANGE_TZ || 'America/Bogota').trim();
+  if (raw && isValidIanaTimeZone(raw)) return raw;
+  return 'America/Bogota';
+}
+
+/**
+ * Fecha calendario en la zona de negocio, asumiendo la columna `timestamp without time zone`
+ * guarda el instante en convención UTC (típico con TypeORM/Node). Así el filtro coincide con
+ * `dayjs(fecha).format('DD/MM/YYYY')` en el navegador en esa misma zona.
+ */
+export function sqlBusinessCalendarDate(columnSql: string): string {
+  const tz = getDateRangeTimeZone().replace(/'/g, "''");
+  return `((${columnSql} AT TIME ZONE 'UTC') AT TIME ZONE '${tz}')::date`;
+}
+
+/** Condición TypeORM: comparación por día calendario en zona de negocio (inclusive). */
 export function sqlCastDateBetween(columnSql: string): string {
-  return `CAST(${columnSql} AS DATE) BETWEEN CAST(:startDate AS DATE) AND CAST(:endDate AS DATE)`;
+  const d = sqlBusinessCalendarDate(columnSql);
+  return `${d} BETWEEN CAST(:startDate AS DATE) AND CAST(:endDate AS DATE)`;
 }
 
 /** Variante con nombres de parámetro distintos (p. ej. logística: desde/hasta). */
@@ -27,5 +57,6 @@ export function sqlCastDateBetweenAliases(
   startParam: string,
   endParam: string,
 ): string {
-  return `CAST(${columnSql} AS DATE) BETWEEN CAST(:${startParam} AS DATE) AND CAST(:${endParam} AS DATE)`;
+  const d = sqlBusinessCalendarDate(columnSql);
+  return `${d} BETWEEN CAST(:${startParam} AS DATE) AND CAST(:${endParam} AS DATE)`;
 }

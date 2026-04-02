@@ -229,24 +229,74 @@ export class PedidosService {
 
     const dailyQb = qb.clone();
 
-    const result = await qb
-      .select('COUNT(*)::int', 'total')
-      .addSelect(
-        `COUNT(CASE WHEN pedido.estado_unificado = 'ENTREGADO' OR pedido.estado_operativo = 'ENTREGADO' THEN 1 END)::int`,
-        'entregados',
-      )
-      .addSelect(
-        `COUNT(CASE WHEN pedido.estado_unificado ILIKE '%DEVOLUCI%' OR pedido.estado_operativo ILIKE '%DEVOLUCI%' THEN 1 END)::int`,
-        'devoluciones',
-      )
-      .addSelect(
-        `COUNT(CASE WHEN pedido.estado_unificado = 'SIN MAPEAR' THEN 1 END)::int`,
-        'sin_mapear',
-      )
-      .addSelect(`COALESCE(SUM(pedido.venta), 0)::numeric`, 'total_ventas')
-      .addSelect(`COALESCE(SUM(pedido.ganancia_calc), 0)::numeric`, 'total_ganancia')
-      .addSelect(`COALESCE(SUM(pedido.cartera), 0)::numeric`, 'total_cartera')
-      .getRawOne();
+    const productosQb = this.pedidoRepository
+      .createQueryBuilder('pedido')
+      .innerJoin('productos_detalle', 'pd', 'pd.pedido_id_dropi = pedido.id_dropi');
+    if (startDate && endDate) {
+      productosQb.andWhere(sqlCastDateBetween('pedido.fecha'), {
+        startDate: extractCalendarDateParam(startDate),
+        endDate: extractCalendarDateParam(endDate),
+      });
+    }
+
+    const guiasDailyQb = this.pedidoRepository.createQueryBuilder('pedido');
+    if (startDate && endDate) {
+      guiasDailyQb.andWhere(sqlCastDateBetween('pedido.fecha'), {
+        startDate: extractCalendarDateParam(startDate),
+        endDate: extractCalendarDateParam(endDate),
+      });
+    }
+
+    const prodDailyQb = this.pedidoRepository
+      .createQueryBuilder('pedido')
+      .innerJoin('productos_detalle', 'pd', 'pd.pedido_id_dropi = pedido.id_dropi');
+    if (startDate && endDate) {
+      prodDailyQb.andWhere(sqlCastDateBetween('pedido.fecha'), {
+        startDate: extractCalendarDateParam(startDate),
+        endDate: extractCalendarDateParam(endDate),
+      });
+    }
+
+    const [result, productosRow, guiasDailyRows, prodDailyRows] = await Promise.all([
+      qb
+        .select('COUNT(*)::int', 'total')
+        .addSelect(
+          `COUNT(CASE WHEN pedido.estado_unificado = 'ENTREGADO' OR pedido.estado_operativo = 'ENTREGADO' THEN 1 END)::int`,
+          'entregados',
+        )
+        .addSelect(
+          `COUNT(CASE WHEN pedido.estado_unificado ILIKE '%DEVOLUCI%' OR pedido.estado_operativo ILIKE '%DEVOLUCI%' THEN 1 END)::int`,
+          'devoluciones',
+        )
+        .addSelect(
+          `COUNT(CASE WHEN pedido.estado_unificado = 'SIN MAPEAR' THEN 1 END)::int`,
+          'sin_mapear',
+        )
+        .addSelect(`COALESCE(SUM(pedido.venta), 0)::numeric`, 'total_ventas')
+        .addSelect(`COALESCE(SUM(pedido.ganancia_calc), 0)::numeric`, 'total_ganancia')
+        .addSelect(`COALESCE(SUM(pedido.cartera), 0)::numeric`, 'total_cartera')
+        .addSelect(
+          `COUNT(CASE WHEN pedido.guia IS NOT NULL AND TRIM(COALESCE(pedido.guia, '')) <> '' THEN 1 END)::int`,
+          'total_guias',
+        )
+        .getRawOne(),
+      productosQb.select('COALESCE(SUM(pd.cantidad), 0)', 'productos_vendidos').getRawOne(),
+      guiasDailyQb
+        .select('DATE(pedido.fecha)', 'date')
+        .addSelect(
+          `COUNT(CASE WHEN pedido.guia IS NOT NULL AND TRIM(COALESCE(pedido.guia, '')) <> '' THEN 1 END)::int`,
+          'totalGuias',
+        )
+        .groupBy('DATE(pedido.fecha)')
+        .orderBy('DATE(pedido.fecha)', 'ASC')
+        .getRawMany(),
+      prodDailyQb
+        .select('DATE(pedido.fecha)', 'date')
+        .addSelect('COALESCE(SUM(pd.cantidad), 0)::bigint', 'productosVendidos')
+        .groupBy('DATE(pedido.fecha)')
+        .orderBy('DATE(pedido.fecha)', 'ASC')
+        .getRawMany(),
+    ]);
 
     const dailyResult = await dailyQb
       .select('DATE(pedido.fecha)', 'date')
@@ -270,6 +320,22 @@ export class PedidosService {
       .orderBy('DATE(pedido.fecha)', 'ASC')
       .getRawMany();
 
+    const dateKey = (v: unknown): string => {
+      if (v instanceof Date) return v.toISOString().split('T')[0];
+      return v ? String(v).slice(0, 10) : '';
+    };
+
+    const guiasByDate = new Map<string, number>();
+    for (const r of guiasDailyRows as { date?: unknown; totalGuias?: string | number }[]) {
+      const k = dateKey(r.date);
+      if (k) guiasByDate.set(k, Number(r.totalGuias ?? 0));
+    }
+    const prodByDate = new Map<string, number>();
+    for (const r of prodDailyRows as { date?: unknown; productosVendidos?: string | number }[]) {
+      const k = dateKey(r.date);
+      if (k) prodByDate.set(k, Number(r.productosVendidos ?? 0));
+    }
+
     const daily = dailyResult.map(row => {
       const dTotal = row.total || 0;
       const dEntregados = row.entregados || 0;
@@ -291,6 +357,8 @@ export class PedidosService {
         totalVentas: Number(row.total_ventas || 0),
         totalGanancia: Number(row.total_ganancia || 0),
         totalCartera: Number(row.total_cartera || 0),
+        totalGuias: guiasByDate.get(dDateStr.slice(0, 10)) ?? 0,
+        productosVendidos: prodByDate.get(dDateStr.slice(0, 10)) ?? 0,
       };
     }).filter(d => Boolean(d.date));
 
@@ -299,6 +367,8 @@ export class PedidosService {
     const devoluciones = result.devoluciones || 0;
     const sinMapear = result.sin_mapear || 0;
     const enProceso = Math.max(0, total - entregados - devoluciones - sinMapear);
+
+    const pr = productosRow as { productos_vendidos?: string | number } | undefined;
 
     return {
       total,
@@ -309,6 +379,8 @@ export class PedidosService {
       totalGanancia: Number(result.total_ganancia || 0),
       totalCartera: Number(result.total_cartera || 0),
       sinMapear,
+      totalGuias: Number(result.total_guias ?? 0),
+      productosVendidos: Number(pr?.productos_vendidos ?? 0),
       daily,
     };
   }

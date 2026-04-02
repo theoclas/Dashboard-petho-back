@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Pedido } from '../pedidos/entities/pedido.entity';
@@ -32,6 +32,8 @@ export interface ComparativaGeograficaResponse {
 
 @Injectable()
 export class ReportesLogisticaService {
+  private readonly logger = new Logger(ReportesLogisticaService.name);
+
   constructor(
     @InjectRepository(Pedido)
     private readonly pedidoRepository: Repository<Pedido>,
@@ -42,6 +44,7 @@ export class ReportesLogisticaService {
     hasta?: string;
     transportadora?: string;
   }): Promise<EfectividadTransportadoraRow[]> {
+    try {
     const bucket = pedidoBucketCaseSql('pedido');
     const qb = this.pedidoRepository
       .createQueryBuilder('pedido')
@@ -115,6 +118,11 @@ export class ReportesLogisticaService {
         pctEntregados: Math.round((entregados / den) * 1000) / 10,
       };
     });
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.error(`getEfectividadTransportadoras: ${err.message}`, err.stack);
+      throw e;
+    }
   }
 
   async getComparativaGeografica(params: {
@@ -124,6 +132,7 @@ export class ReportesLogisticaService {
     desde?: string;
     hasta?: string;
   }): Promise<ComparativaGeograficaResponse> {
+    try {
     const geoPath =
       params.dimension === 'ciudad' ? 'pedido.ciudad' : 'pedido.departamento';
     const bucket = pedidoBucketCaseSql('pedido');
@@ -215,5 +224,10 @@ export class ReportesLogisticaService {
       ubicaciones,
       puntos,
     };
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.error(`getComparativaGeografica: ${err.message}`, err.stack);
+      throw e;
+    }
   }
 }

@@ -26,7 +26,7 @@ Documento de referencia para implementar en **Dashboard-Petho-back** las capacid
 | Fase 0 | Parcial: reglas de estado en código (`src/common/pedido-logistica-sql.ts`); sin inventario formal en BD. |
 | Fase 1 | **Hecha** — `GET /api/reportes-logistica/efectividad-transportadoras` |
 | Fase 2 | **Hecha** — `GET /api/reportes-logistica/comparativa-geografica` |
-| Fase 3 | Parcial — DTO + JWT; sugerencias SQL en [`docs/sql-sugerencias/indices-reportes-pedidos.sql`](../docs/sql-sugerencias/indices-reportes-pedidos.sql) (revisar antes de aplicar). |
+| Fase 3 | Parcial — DTO + JWT; índices SQL documentados; `Logger` en errores de servicio (sin PII); MV/job nocturno pendiente si hace falta. |
 
 ---
 
@@ -91,7 +91,7 @@ Endpoint sugerido:
 - [ ] Evitar timeouts: para tablas grandes, considerar **materialized view** o job nocturno (documentar si se pospone).
 - [x] Validar query params con `class-validator` — [`efectividad-query.dto.ts`](../src/reportes-logistica/dto/efectividad-query.dto.ts).
 - [x] Endpoint **no público** (JWT obligatorio).
-- [ ] Logging mínimo en errores; no loguear PII.
+- [x] Logging mínimo en errores (`ReportesLogisticaService`: mensaje + stack; sin query params ni datos de cliente).
 
 **Criterio de hecho:** tiempos aceptables en producción con volumen esperado; revisión de seguridad básica completada.
 

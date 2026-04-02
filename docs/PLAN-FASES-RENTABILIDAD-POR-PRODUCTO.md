@@ -33,7 +33,7 @@ Documento para implementar el endpoint (o endpoints) que alimentan la tabla **Re
 |------|--------|
 | Fase 0 | Parcial en código: agrupación `TRIM(producto_nombre)`; ventas/utilidad = suma por pedido deduplicado con `DISTINCT ON`; pauta = `SUM(gasto_publicidad)` con join `LOWER(TRIM)`. |
 | Fase 1 | **Hecha** — `GET /api/reportes-rentabilidad/por-producto` |
-| Fase 2 | **Hecha en backend** — `ORDER BY` whitelist + `search` ILIKE + `total` filtrado (pendiente consumo completo desde UI). |
+| Fase 2 | **Hecha** — backend (`sortBy` / `search` / `total`) + UI [`RentabilidadProductoPage.tsx`](../../Dashboard-petho-Front/src/pages/RentabilidadProductoPage.tsx) con orden y búsqueda server-side. |
 | Fase 3 | No aplica MVP sin paginación server-side (ya hay paginación). |
 | Fase 4 | Parcial — JWT; sin tests automatizados aún. |
 
@@ -98,6 +98,7 @@ Si el volumen es bajo temporalmente:
 
 - [x] **JwtAuthGuard** en [`reportes-rentabilidad.controller.ts`](../src/reportes-rentabilidad/reportes-rentabilidad.controller.ts) (revisar alineación de roles con negocio).
 - [x] Respuesta sin datos de cliente (solo producto y agregados).
+- [x] Errores SQL logueados en servicio (`Logger`, sin PII).
 - [ ] Tests de integración o checklist manual formal.
 
 **Criterio de hecho:** revisión de permisos y ausencia de fugas de datos.

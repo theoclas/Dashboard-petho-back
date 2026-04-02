@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { pedidoBucketCaseSql } from '../common/pedido-logistica-sql';
 import type { RentabilidadSortBy } from './dto/por-producto-query.dto';
@@ -31,6 +31,8 @@ const SORT_SQL: Record<RentabilidadSortBy, string> = {
 
 @Injectable()
 export class ReportesRentabilidadService {
+  private readonly logger = new Logger(ReportesRentabilidadService.name);
+
   constructor(private readonly dataSource: DataSource) {}
 
   async getPorProducto(params: {
@@ -42,6 +44,7 @@ export class ReportesRentabilidadService {
     order: 'asc' | 'desc';
     search?: string;
   }): Promise<{ data: RentabilidadProductoRow[]; total: number; page: number; limit: number }> {
+    try {
     const bucketExpr = pedidoBucketCaseSql('p');
     const hasRange = Boolean(params.desde && params.hasta);
     const desde = hasRange ? new Date(params.desde!) : null;
@@ -163,5 +166,10 @@ export class ReportesRentabilidadService {
       page: params.page,
       limit: params.limit,
     };
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.error(`getPorProducto: ${err.message}`, err.stack);
+      throw e;
+    }
   }
 }

@@ -11,6 +11,8 @@ import { ImportModule } from './import/import.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { CpaModule } from './cpa/cpa.module';
+import { ReportesLogisticaModule } from './reportes-logistica/reportes-logistica.module';
+import { ReportesRentabilidadModule } from './reportes-rentabilidad/reportes-rentabilidad.module';
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import { CpaModule } from './cpa/cpa.module';
     UsersModule,
     AuthModule,
     CpaModule,
+    ReportesLogisticaModule,
+    ReportesRentabilidadModule,
   ],
   controllers: [],
   providers: [],

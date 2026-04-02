@@ -4,6 +4,10 @@ import { Repository } from 'typeorm';
 import { CreateCpaDto } from './dto/create-cpa.dto';
 import { UpdateCpaDto } from './dto/update-cpa.dto';
 import { Cpa } from './entities/cpa.entity';
+import {
+  extractCalendarDateParam,
+  sqlCastDateBetween,
+} from '../common/calendar-date-range';
 
 @Injectable()
 export class CpaService {
@@ -65,9 +69,9 @@ export class CpaService {
     const qb = this.cpaRepository.createQueryBuilder('cpa');
 
     if (startDate && endDate) {
-      qb.andWhere('cpa.fecha BETWEEN :startDate AND :endDate', {
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+      qb.andWhere(sqlCastDateBetween('cpa.fecha'), {
+        startDate: extractCalendarDateParam(startDate),
+        endDate: extractCalendarDateParam(endDate),
       });
     }
 

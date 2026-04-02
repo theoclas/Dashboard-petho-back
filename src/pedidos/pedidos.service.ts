@@ -6,6 +6,10 @@ import { Pedido } from './entities/pedido.entity';
 import { CreatePedidoDto } from './dto/create-pedido.dto';
 import { UpdatePedidoDto } from './dto/update-pedido.dto';
 import { ProductosDetalleService } from '../productos-detalle/productos-detalle.service';
+import {
+  extractCalendarDateParam,
+  sqlCastDateBetween,
+} from '../common/calendar-date-range';
 
 /** Filtros y orden compartidos entre listado paginado y exportación Excel. */
 export type PedidoListQuery = {
@@ -83,9 +87,9 @@ export class PedidosService {
 
   private applyPedidoFilters(qb: SelectQueryBuilder<Pedido>, query?: PedidoListQuery): void {
     if (query?.startDate && query?.endDate) {
-      qb.andWhere('pedido.fecha BETWEEN :startDate AND :endDate', {
-        startDate: new Date(query.startDate),
-        endDate: new Date(query.endDate),
+      qb.andWhere(sqlCastDateBetween('pedido.fecha'), {
+        startDate: extractCalendarDateParam(query.startDate),
+        endDate: extractCalendarDateParam(query.endDate),
       });
     }
 
@@ -217,9 +221,9 @@ export class PedidosService {
     const qb = this.pedidoRepository.createQueryBuilder('pedido');
 
     if (startDate && endDate) {
-      qb.andWhere('pedido.fecha BETWEEN :startDate AND :endDate', {
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+      qb.andWhere(sqlCastDateBetween('pedido.fecha'), {
+        startDate: extractCalendarDateParam(startDate),
+        endDate: extractCalendarDateParam(endDate),
       });
     }
 

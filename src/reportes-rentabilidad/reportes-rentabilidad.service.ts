@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { pedidoBucketCaseSql } from '../common/pedido-logistica-sql';
+import { extractCalendarDateParam } from '../common/calendar-date-range';
 import type { RentabilidadSortBy } from './dto/por-producto-query.dto';
 
 export interface RentabilidadProductoRow {
@@ -47,8 +48,8 @@ export class ReportesRentabilidadService {
     try {
     const bucketExpr = pedidoBucketCaseSql('p');
     const hasRange = Boolean(params.desde && params.hasta);
-    const desde = hasRange ? new Date(params.desde!) : null;
-    const hasta = hasRange ? new Date(params.hasta!) : null;
+    const desdeCal = hasRange ? extractCalendarDateParam(params.desde!) : null;
+    const hastaCal = hasRange ? extractCalendarDateParam(params.hasta!) : null;
     const searchPattern = `%${(params.search ?? '').trim()}%`;
     const offset = (params.page - 1) * params.limit;
     const sortCol = SORT_SQL[params.sortBy] ?? SORT_SQL.utilidad;
@@ -63,10 +64,10 @@ export class ReportesRentabilidadService {
     let dateCondPedido = '';
     let dateCondCpa = '';
     if (hasRange) {
-      const d1 = push(desde);
-      const d2 = push(hasta);
-      dateCondPedido = `AND p.fecha >= ${d1} AND p.fecha <= ${d2}`;
-      dateCondCpa = `AND cpa.fecha >= ${d1} AND cpa.fecha <= ${d2}`;
+      const d1 = push(desdeCal);
+      const d2 = push(hastaCal);
+      dateCondPedido = `AND p.fecha::date >= ${d1}::date AND p.fecha::date <= ${d2}::date`;
+      dateCondCpa = `AND cpa.fecha::date >= ${d1}::date AND cpa.fecha::date <= ${d2}::date`;
     }
 
     const ilikePh = push(searchPattern);

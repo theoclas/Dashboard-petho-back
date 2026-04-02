@@ -3,6 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Pedido } from '../pedidos/entities/pedido.entity';
 import { pedidoBucketCaseSql } from '../common/pedido-logistica-sql';
+import {
+  extractCalendarDateParam,
+  sqlCastDateBetweenAliases,
+} from '../common/calendar-date-range';
 
 export interface EfectividadTransportadoraRow {
   empresa: string;
@@ -73,9 +77,9 @@ export class ReportesLogisticaService {
       .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''");
 
     if (params.desde && params.hasta) {
-      qb.andWhere('pedido.fecha BETWEEN :desde AND :hasta', {
-        desde: new Date(params.desde),
-        hasta: new Date(params.hasta),
+      qb.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
+        desde: extractCalendarDateParam(params.desde),
+        hasta: extractCalendarDateParam(params.hasta),
       });
     }
 
@@ -145,9 +149,9 @@ export class ReportesLogisticaService {
       .andWhere(`${geoPath} IS NOT NULL AND TRIM(${geoPath}) <> ''`);
 
     if (params.desde && params.hasta) {
-      qbTop.andWhere('pedido.fecha BETWEEN :desde AND :hasta', {
-        desde: new Date(params.desde),
-        hasta: new Date(params.hasta),
+      qbTop.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
+        desde: extractCalendarDateParam(params.desde),
+        hasta: extractCalendarDateParam(params.hasta),
       });
     }
 
@@ -184,9 +188,9 @@ export class ReportesLogisticaService {
       .andWhere(`TRIM(${geoPath}) IN (:...locs)`, { locs: ubicaciones });
 
     if (params.desde && params.hasta) {
-      qbDet.andWhere('pedido.fecha BETWEEN :desde AND :hasta', {
-        desde: new Date(params.desde),
-        hasta: new Date(params.hasta),
+      qbDet.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
+        desde: extractCalendarDateParam(params.desde),
+        hasta: extractCalendarDateParam(params.hasta),
       });
     }
 

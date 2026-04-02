@@ -36,13 +36,27 @@ export function getDateRangeTimeZone(): string {
 }
 
 /**
- * Fecha calendario en la zona de negocio, asumiendo la columna `timestamp without time zone`
- * guarda el instante en convención UTC (típico con TypeORM/Node). Así el filtro coincide con
- * `dayjs(fecha).format('DD/MM/YYYY')` en el navegador en esa misma zona.
+ * Cómo interpretar `timestamp without time zone` al sacar el día calendario:
+ * - `local` (default): componentes de reloj son hora local en DATE_RANGE_TZ (típico import Excel / “solo fecha”).
+ * - `utc`: el naive es instante UTC (útil si todo viene serializado en UTC).
+ *
+ * Con `utc`, `2026-02-01 00:00` cuenta como 31-ene en Bogotá y **cae fuera** de un filtro febrero
+ * aunque en BD e import signifique “1 de febrero”.
+ */
+export function getDateRangeTsStore(): 'local' | 'utc' {
+  const v = (process.env.DATE_RANGE_TS_STORE || 'local').trim().toLowerCase();
+  return v === 'utc' ? 'utc' : 'local';
+}
+
+/**
+ * Fecha calendario en DATE_RANGE_TZ para columnas `timestamp without time zone`.
  */
 export function sqlBusinessCalendarDate(columnSql: string): string {
   const tz = getDateRangeTimeZone().replace(/'/g, "''");
-  return `((${columnSql} AT TIME ZONE 'UTC') AT TIME ZONE '${tz}')::date`;
+  if (getDateRangeTsStore() === 'utc') {
+    return `((${columnSql} AT TIME ZONE 'UTC') AT TIME ZONE '${tz}')::date`;
+  }
+  return `((${columnSql} AT TIME ZONE '${tz}') AT TIME ZONE '${tz}')::date`;
 }
 
 /** Condición TypeORM: comparación por día calendario en zona de negocio (inclusive). */

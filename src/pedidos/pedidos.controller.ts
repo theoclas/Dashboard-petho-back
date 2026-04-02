@@ -11,11 +11,14 @@ import {
   UseGuards,
   Res,
   StreamableFile,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { PedidosService } from './pedidos.service';
 import { CreatePedidoDto } from './dto/create-pedido.dto';
 import { UpdatePedidoDto } from './dto/update-pedido.dto';
+import { ExportPedidosDto } from './dto/export-pedidos.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -59,28 +62,25 @@ export class PedidosController {
     });
   }
 
-  /** Mismos filtros que GET /pedidos (sin page/limit); descarga .xlsx con todas las filas coincidentes (tope en servidor). */
-  @Get('export')
+  /**
+   * Exportación Excel: POST con JSON para que los filtros no se pierdan en proxies
+   * y no se cachee como un GET. Mismos criterios que GET /pedidos (sin page/limit).
+   */
+  @Post('export')
+  @HttpCode(HttpStatus.OK)
   async exportExcel(
+    @Body() body: ExportPedidosDto,
     @Res({ passthrough: true }) res: Response,
-    @Query('estado_unificado') estadoUnificado?: string,
-    @Query('transportadora') transportadora?: string,
-    @Query('ciudad') ciudad?: string,
-    @Query('id_dropi') idDropi?: string,
-    @Query('sortField') sortField?: string,
-    @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
   ) {
     const result = await this.pedidosService.exportPedidosExcel({
-      estado_unificado: estadoUnificado,
-      transportadora,
-      ciudad,
-      id_dropi: idDropi,
-      sortField,
-      sortOrder,
-      startDate,
-      endDate,
+      estado_unificado: body.estado_unificado,
+      transportadora: body.transportadora,
+      ciudad: body.ciudad,
+      id_dropi: body.id_dropi,
+      sortField: body.sortField,
+      sortOrder: body.sortOrder,
+      startDate: body.startDate,
+      endDate: body.endDate,
     });
     const filename = `pedidos_export_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.xlsx`;
     res.setHeader(
@@ -91,6 +91,8 @@ export class PedidosController {
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
+    res.setHeader('Cache-Control', 'no-store, private, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
     res.setHeader('X-Export-Row-Count', String(result.rowCount));
     res.setHeader('X-Export-Total-Matching', String(result.totalMatching));
     res.setHeader('X-Export-Truncated', result.truncated ? 'true' : 'false');

@@ -14,6 +14,11 @@ export class PedidosService {
     private readonly productosDetalleService: ProductosDetalleService,
   ) { }
 
+  /** Público para flujos batch (remapeo) que preparan filas antes de `bulkUpsertRaw`. */
+  recalculateFinancials(pedido: Pedido): void {
+    this.calculateFinancials(pedido);
+  }
+
   private calculateFinancials(pedido: Pedido) {
     const venta = Number(pedido.venta ?? 0);
     const flete = Number(pedido.flete ?? 0);

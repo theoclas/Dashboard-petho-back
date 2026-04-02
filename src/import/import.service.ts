@@ -491,82 +491,109 @@ export class ImportService {
     return { imported, errors };
   }
 
+  /**
+   * Remapeo masivo optimizado (mismo patrón que import Excel):
+   * - Paginación fija en `SIN MAPEAR` (siempre página 1 hasta agotar).
+   * - Una query de cartera por lote (`getCarteraMapByOrdenIds`).
+   * - Persistencia con `bulkUpsertRaw` (pocos round-trips vs N upserts).
+   */
   async remapearPedidos(): Promise<{ procesados: number; remapeados: number }> {
+    const BATCH = 400;
     const resolveEstadoEnMemoria = await this.getResolverEnMemoria();
-    const result = await this.pedidosService.findAll({ estado_unificado: 'SIN MAPEAR', limit: 3000 });
-    const pedidosPendientes = result.data;
+
+    const normalizeKey = (text: string): string => {
+      let s = text.toLowerCase().trim();
+      s = s.replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i')
+           .replace(/ó/g, 'o').replace(/ú/g, 'u').replace(/ü/g, 'u');
+      return s;
+    };
 
     let procesados = 0;
     let remapeados = 0;
+    let batchIndex = 0;
 
-    for (const pedido of pedidosPendientes) {
-      procesados++;
-      
-      const normalizeKey = (text: string): string => {
-        let s = text.toLowerCase().trim();
-        s = s.replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i')
-             .replace(/ó/g, 'o').replace(/ú/g, 'u').replace(/ü/g, 'u');
-        return s;
-      };
+    while (true) {
+      const { data: pedidosPendientes } = await this.pedidosService.findAll({
+        estado_unificado: 'SIN MAPEAR',
+        page: 1,
+        limit: BATCH,
+      });
 
-      const estNorm = normalizeKey(pedido.estatus_original || '');
-      const movNorm = pedido.ultimo_mov ? normalizeKey(pedido.ultimo_mov) : '';
+      if (pedidosPendientes.length === 0) break;
 
-      let pedidoKey: string | undefined;
-      if (estNorm !== '' && estNorm !== 'guia_generada' && estNorm !== 'guia generada') {
-        pedidoKey = pedido.estatus_original;
-      } else if (movNorm !== '') {
-        pedidoKey = pedido.ultimo_mov; 
-      } else {
-        pedidoKey = pedido.estatus_original;
-      }
+      batchIndex++;
+      const ids = pedidosPendientes.map((p) => p.id_dropi).filter(Boolean);
+      const carteraMap = await this.carteraService.getCarteraMapByOrdenIds(ids);
 
-      let estadoUnificado = resolveEstadoEnMemoria(
-        pedido.transportadora,
-        pedidoKey,
-        pedido.ultimo_mov,
-      );
+      const toUpsert: Pedido[] = [];
 
-      if (estadoUnificado && estadoUnificado.trim() !== '') {
+      for (const pedido of pedidosPendientes) {
+        procesados++;
+
+        const estNorm = normalizeKey(pedido.estatus_original || '');
+        const movNorm = pedido.ultimo_mov ? normalizeKey(pedido.ultimo_mov) : '';
+
+        let pedidoKey: string | undefined;
+        if (estNorm !== '' && estNorm !== 'guia_generada' && estNorm !== 'guia generada') {
+          pedidoKey = pedido.estatus_original;
+        } else if (movNorm !== '') {
+          pedidoKey = pedido.ultimo_mov;
+        } else {
+          pedidoKey = pedido.estatus_original;
+        }
+
+        const estadoUnificado = resolveEstadoEnMemoria(
+          pedido.transportadora,
+          pedidoKey,
+          pedido.ultimo_mov,
+        );
+
+        if (!estadoUnificado || estadoUnificado.trim() === '') continue;
+
         let estadoOperativo = estadoUnificado;
-        if (estadoUnificado === 'OFICINA' && pedido.dias_desde_ult_mov !== undefined && pedido.dias_desde_ult_mov > 1) {
+        if (
+          estadoUnificado === 'OFICINA' &&
+          pedido.dias_desde_ult_mov !== undefined &&
+          pedido.dias_desde_ult_mov > 1
+        ) {
           estadoOperativo = 'OFICINA 1';
         }
 
-        const carteraResult = await this.carteraService.getCarteraPorPedido(pedido.id_dropi);
-        const carteraNeto = Number(carteraResult?.cartera_neto) || 0;
-
+        const carteraNeto = carteraMap.get(pedido.id_dropi) ?? 0;
         const estadosConCartera = ['ENTREGADO', 'DEVOLUCION', 'DEVOLUCIÓN'];
-        const carteraAplicada = estadosConCartera.includes(estadoUnificado.toUpperCase())
-          ? carteraNeto
-          : 0;
-
+        const eu = estadoUnificado.toUpperCase();
+        const carteraAplicada = estadosConCartera.includes(eu) ? carteraNeto : 0;
         const estadoCartera =
-          carteraNeto !== 0 && estadosConCartera.includes(estadoUnificado.toUpperCase())
-            ? 'OK'
-            : '';
+          carteraNeto !== 0 && estadosConCartera.includes(eu) ? 'OK' : '';
 
-        let cartera = 0;
-        if (estadoOperativo === 'ENTREGADO') {
-          cartera = pedido.ganancia_calc || 0;
-        } else if (estadoOperativo === 'DEVOLUCION' || estadoOperativo === 'DEVOLUCIÓN') {
-          cartera = pedido.costo_devolucion_estimado || 0;
-        }
+        const row = Object.assign(new Pedido(), pedido);
+        row.estado_unificado = estadoUnificado;
+        row.estado_operativo = estadoOperativo;
+        row.cartera_aplicada = carteraAplicada;
+        row.estado_cartera = estadoCartera;
+        this.pedidosService.recalculateFinancials(row);
 
-        await this.pedidosService.upsertByDropiId({
-          id_dropi: pedido.id_dropi,
-          estado_unificado: estadoUnificado,
-          estado_operativo: estadoOperativo,
-          cartera_aplicada: carteraAplicada,
-          estado_cartera: estadoCartera,
-          cartera: cartera,
-        });
-
+        toUpsert.push(row);
         remapeados++;
       }
+
+      if (toUpsert.length > 0) {
+        await this.pedidosService.bulkUpsertRaw(toUpsert);
+      } else if (pedidosPendientes.length > 0) {
+        this.logger.warn(
+          `Remapeo: ${pedidosPendientes.length} pedidos "SIN MAPEAR" sin coincidencia en mapeo_estados; se detiene para evitar bucle infinito. Revise tablas de mapeo.`,
+        );
+        break;
+      }
+
+      this.logger.log(
+        `Remapeo lote ${batchIndex}: leídos ${pedidosPendientes.length}, persistidos ${toUpsert.length} (acum. actualizados ${remapeados})`,
+      );
+
+      if (pedidosPendientes.length < BATCH) break;
     }
 
-    this.logger.log(`Proceso de remapeo: Evaluados ${procesados}, Actualizados ${remapeados}`);
+    this.logger.log(`Remapeo terminado: evaluados ${procesados}, actualizados ${remapeados}`);
     return { procesados, remapeados };
   }
 

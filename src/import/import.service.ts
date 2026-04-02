@@ -2,8 +2,12 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import * as XLSX from 'xlsx';
+import { DataSource } from 'typeorm';
 import { PedidosService } from '../pedidos/pedidos.service';
 import { CarteraService } from '../cartera/cartera.service';
 import { MapeoEstadosService } from '../mapeo-estados/mapeo-estados.service';
@@ -11,6 +15,8 @@ import { NotasService } from '../notas/notas.service';
 import { ProductosDetalleService } from '../productos-detalle/productos-detalle.service';
 import { CpaService } from '../cpa/cpa.service';
 import { Pedido } from '../pedidos/entities/pedido.entity';
+import { ProductoDetalle } from '../productos-detalle/entities/producto-detalle.entity';
+import { CarteraMovimiento } from '../cartera/entities/cartera-movimiento.entity';
 
 @Injectable()
 export class ImportService {
@@ -23,7 +29,59 @@ export class ImportService {
     private readonly notasService: NotasService,
     private readonly productosDetalleService: ProductosDetalleService,
     private readonly cpaService: CpaService,
+    private readonly dataSource: DataSource,
   ) {}
+
+  private hashWipeSecret(plain: string): Buffer {
+    return crypto.createHash('sha256').update(plain, 'utf8').digest();
+  }
+
+  /**
+   * Vacía tablas cargadas por import (pedidos, líneas de producto, movimientos de cartera).
+   * Requiere IMPORT_WIPE_SECRET en .env y contraseña idéntica (comparación por hash, timing-safe).
+   * No borra: mapeo_estados, notas_manuales, cpas, usuarios.
+   */
+  async wipeImportedTables(password: string): Promise<{
+    deleted: {
+      productos_detalle: number;
+      cartera_movimientos: number;
+      pedidos: number;
+    };
+  }> {
+    const configured = process.env.IMPORT_WIPE_SECRET?.trim();
+    if (!configured) {
+      throw new ForbiddenException(
+        'Limpieza deshabilitada: define IMPORT_WIPE_SECRET en el servidor.',
+      );
+    }
+    const a = this.hashWipeSecret(password);
+    const b = this.hashWipeSecret(configured);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      throw new UnauthorizedException('Contraseña incorrecta');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const nPd = await manager.count(ProductoDetalle);
+      const nCar = await manager.count(CarteraMovimiento);
+      const nPe = await manager.count(Pedido);
+
+      await manager.createQueryBuilder().delete().from(ProductoDetalle).execute();
+      await manager.createQueryBuilder().delete().from(CarteraMovimiento).execute();
+      await manager.createQueryBuilder().delete().from(Pedido).execute();
+
+      this.logger.warn(
+        `WIPE tablas import: productos_detalle=${nPd}, cartera_movimientos=${nCar}, pedidos=${nPe}`,
+      );
+
+      return {
+        deleted: {
+          productos_detalle: nPd,
+          cartera_movimientos: nCar,
+          pedidos: nPe,
+        },
+      };
+    });
+  }
 
   private async getResolverEnMemoria() {
     const todosMapeos = await this.mapeoEstadosService.findAll();

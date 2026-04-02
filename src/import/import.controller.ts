@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Post,
   UseInterceptors,
@@ -8,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ImportService } from './import.service';
+import { WipeImportedDto } from './dto/wipe-imported.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -67,5 +69,12 @@ export class ImportController {
   @Post('remapear-estados')
   async remapearEstados() {
     return this.importService.remapearPedidos();
+  }
+
+  /** Solo ADMIN: vacía pedidos, productos_detalle y cartera_movimientos (contraseña = IMPORT_WIPE_SECRET). */
+  @Post('wipe-imported-tables')
+  @Roles(UserRole.ADMIN)
+  async wipeImportedTables(@Body() dto: WipeImportedDto) {
+    return this.importService.wipeImportedTables(dto.password);
   }
 }

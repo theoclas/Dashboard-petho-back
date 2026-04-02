@@ -35,7 +35,7 @@ Documento para implementar el endpoint (o endpoints) que alimentan la tabla **Re
 | Fase 1 | **Hecha** — `GET /api/reportes-rentabilidad/por-producto` |
 | Fase 2 | **Hecha** — backend (`sortBy` / `search` / `total`) + UI [`RentabilidadProductoPage.tsx`](../../Dashboard-petho-Front/src/pages/RentabilidadProductoPage.tsx) con orden y búsqueda server-side. |
 | Fase 3 | No aplica MVP sin paginación server-side (ya hay paginación). |
-| Fase 4 | Parcial — JWT; sin tests automatizados aún. |
+| Fase 4 | Parcial — JWT; tests unitarios + e2e HTTP (mocks) en `*.spec.ts` / `test/reportes-*.e2e-spec.ts`; e2e contra API real opcional (`npm run test:e2e:live` + `E2E_*`). |
 
 ---
 
@@ -99,7 +99,7 @@ Si el volumen es bajo temporalmente:
 - [x] **JwtAuthGuard** en [`reportes-rentabilidad.controller.ts`](../src/reportes-rentabilidad/reportes-rentabilidad.controller.ts) (revisar alineación de roles con negocio).
 - [x] Respuesta sin datos de cliente (solo producto y agregados).
 - [x] Errores SQL logueados en servicio (`Logger`, sin PII).
-- [ ] Tests de integración o checklist manual formal.
+- [x] Tests automatizados — unit: [`reportes-rentabilidad.service.spec.ts`](../src/reportes-rentabilidad/reportes-rentabilidad.service.spec.ts); e2e: [`test/reportes-rentabilidad.e2e-spec.ts`](../test/reportes-rentabilidad.e2e-spec.ts); live opcional: [`test/reportes-api-live.e2e-spec.ts`](../test/reportes-api-live.e2e-spec.ts) (`E2E_BASE_URL`, `E2E_JWT`).
 
 **Criterio de hecho:** revisión de permisos y ausencia de fugas de datos.
 

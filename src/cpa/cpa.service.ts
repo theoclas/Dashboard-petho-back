@@ -193,16 +193,22 @@ export class CpaService {
     const dailyQb = qb.clone();
 
     const result = await qb
-      .select('SUM(cpa.cpa)', 'total_cpa')
-      .addSelect('SUM(cpa.gasto_publicidad)', 'total_gasto_publicidad')
+      .select('SUM(cpa.gasto_publicidad)', 'total_gasto_publicidad')
       .addSelect('SUM(cpa.utilidad_aproximada)', 'total_utilidad')
       .addSelect('SUM(cpa.ventas)', 'total_ventas')
       .addSelect('SUM(cpa.conversaciones)', 'total_conversaciones')
       .getRawOne();
 
+    /**
+     * CPA agregado: gasto ÷ ventas en el rango (ponderado).
+     * No usar SUM(cpa): cada fila ya es un CPA por cuenta/día; sumarlos no tiene sentido económico.
+     */
+    const totalGasto = Number(result.total_gasto_publicidad || 0);
+    const totalVentasCpa = Number(result.total_ventas || 0);
+    const totalCpaWeighted = totalVentasCpa > 0 ? totalGasto / totalVentasCpa : 0;
+
     const dailyResult = await dailyQb
       .select('DATE(cpa.fecha)', 'date')
-      .addSelect('SUM(cpa.cpa)', 'total_cpa')
       .addSelect('SUM(cpa.gasto_publicidad)', 'total_gasto_publicidad')
       .addSelect('SUM(cpa.utilidad_aproximada)', 'total_utilidad')
       .addSelect('SUM(cpa.ventas)', 'total_ventas')
@@ -211,27 +217,33 @@ export class CpaService {
       .orderBy('DATE(cpa.fecha)', 'ASC')
       .getRawMany();
 
-    const daily = dailyResult.map(row => {
-      const dDateStr = row.date instanceof Date 
-        ? row.date.toISOString().split('T')[0] 
-        : (row.date ? String(row.date) : '');
-      
+    const daily = dailyResult.map((row) => {
+      const dDateStr =
+        row.date instanceof Date
+          ? row.date.toISOString().split('T')[0]
+          : row.date
+            ? String(row.date)
+            : '';
+
+      const gasto = Number(row.total_gasto_publicidad || 0);
+      const ventas = Number(row.total_ventas || 0);
+      const cpaDia = ventas > 0 ? gasto / ventas : 0;
+
       return {
         date: dDateStr,
-        cpa: Number(row.total_cpa || 0),
-        gasto_publicidad: Number(row.total_gasto_publicidad || 0),
+        cpa: cpaDia,
+        gasto_publicidad: gasto,
         utilidad_aproximada: Number(row.total_utilidad || 0),
-        ventas: Number(row.total_ventas || 0),
+        ventas,
         conversaciones: Number(row.total_conversaciones || 0),
       };
-    }).filter(d => Boolean(d.date));
+    }).filter((d) => Boolean(d.date));
 
-    // Notice we report 'cpa' as metric, so the chart works easily
     return {
-      totalCpa: Number(result.total_cpa || 0),
-      totalGasto: Number(result.total_gasto_publicidad || 0),
+      totalCpa: totalCpaWeighted,
+      totalGasto,
       totalUtilidadCpa: Number(result.total_utilidad || 0),
-      totalVentasCpa: Number(result.total_ventas || 0),
+      totalVentasCpa,
       totalConversacionesCpa: Number(result.total_conversaciones || 0),
       dailyCpa: daily,
     };

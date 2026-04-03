@@ -87,9 +87,30 @@ function emptyAccum(): CpaLeafAccum {
   };
 }
 
+/**
+ * Fila sin actividad numérica (a menudo celdas vacías importadas como 0).
+ * No debe contar en AVG(CPA) ni AVG(ganancia); los 0 con otras métricas > 0 sí cuentan.
+ */
+function isLegacyCpaAllZeroPlaceholderRow(row: Cpa): boolean {
+  const z = (x: number | null | undefined) =>
+    x == null || Number.isNaN(Number(x)) || Number(x) === 0;
+  return (
+    z(row.gasto_publicidad) &&
+    z(row.ventas) &&
+    z(row.cpa) &&
+    z(row.utilidad_aproximada) &&
+    z(row.conversaciones) &&
+    z(row.ganancia_promedio)
+  );
+}
+
 function addRowToAccum(a: CpaLeafAccum, row: Cpa): CpaLeafAccum {
-  const g = row.ganancia_promedio != null && !Number.isNaN(Number(row.ganancia_promedio));
-  const c = row.cpa != null && !Number.isNaN(Number(row.cpa));
+  const skipAvg = isLegacyCpaAllZeroPlaceholderRow(row);
+  const g =
+    !skipAvg &&
+    row.ganancia_promedio != null &&
+    !Number.isNaN(Number(row.ganancia_promedio));
+  const c = !skipAvg && row.cpa != null && !Number.isNaN(Number(row.cpa));
   return {
     gasto: a.gasto + (row.gasto_publicidad != null ? Number(row.gasto_publicidad) : 0),
     conversaciones: a.conversaciones + (row.conversaciones != null ? Number(row.conversaciones) : 0),

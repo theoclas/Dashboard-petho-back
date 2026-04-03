@@ -41,6 +41,17 @@ export class CpaController {
     return this.cpaService.getDistinctProductos();
   }
 
+  /** Resumen jerárquico (mes → semana → día → cuenta → producto) para el rango de fechas. */
+  @Get('resumen-diario')
+  @Roles(UserRole.ADMIN, UserRole.OPERADOR)
+  getResumenDiario(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('producto') producto?: string,
+  ) {
+    return this.cpaService.getResumenDiario({ startDate, endDate, producto });
+  }
+
   @Get()
   findAll(
     @Query('producto') producto?: string,

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateCpaDto } from './dto/create-cpa.dto';
@@ -8,6 +8,203 @@ import {
   extractCalendarDateParam,
   sqlCastDateBetween,
 } from '../common/calendar-date-range';
+import type {
+  CpaResumenDiarioResponse,
+  CpaResumenMetrics,
+  CpaResumenNode,
+} from './dto/cpa-resumen-diario.dto';
+
+const MESES = [
+  'ENERO',
+  'FEBRERO',
+  'MARZO',
+  'ABRIL',
+  'MAYO',
+  'JUNIO',
+  'JULIO',
+  'AGOSTO',
+  'SEPTIEMBRE',
+  'OCTUBRE',
+  'NOVIEMBRE',
+  'DICIEMBRE',
+];
+const MESES_CORT = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+interface CpaLeafAccum {
+  gasto: number;
+  conversaciones: number;
+  ventas: number;
+  utilidad: number;
+  gananciaVals: number[];
+  cpaVals: number[];
+}
+
+interface CpaLeafData {
+  mesKey: string;
+  mesLabel: string;
+  semana: string;
+  fechaKey: string;
+  fechaLabel: string;
+  cuenta: string;
+  producto: string;
+  accum: CpaLeafAccum;
+}
+
+function emptyAccum(): CpaLeafAccum {
+  return {
+    gasto: 0,
+    conversaciones: 0,
+    ventas: 0,
+    utilidad: 0,
+    gananciaVals: [],
+    cpaVals: [],
+  };
+}
+
+function addRowToAccum(a: CpaLeafAccum, row: Cpa): CpaLeafAccum {
+  const g = row.ganancia_promedio != null && !Number.isNaN(Number(row.ganancia_promedio));
+  const c = row.cpa != null && !Number.isNaN(Number(row.cpa));
+  return {
+    gasto: a.gasto + Number(row.gasto_publicidad ?? 0),
+    conversaciones: a.conversaciones + Number(row.conversaciones ?? 0),
+    ventas: a.ventas + Number(row.ventas ?? 0),
+    utilidad: a.utilidad + Number(row.utilidad_aproximada ?? 0),
+    gananciaVals: [...a.gananciaVals, ...(g ? [Number(row.ganancia_promedio)] : [])],
+    cpaVals: [...a.cpaVals, ...(c ? [Number(row.cpa)] : [])],
+  };
+}
+
+function mergeAccum(a: CpaLeafAccum, b: CpaLeafAccum): CpaLeafAccum {
+  return {
+    gasto: a.gasto + b.gasto,
+    conversaciones: a.conversaciones + b.conversaciones,
+    ventas: a.ventas + b.ventas,
+    utilidad: a.utilidad + b.utilidad,
+    gananciaVals: [...a.gananciaVals, ...b.gananciaVals],
+    cpaVals: [...a.cpaVals, ...b.cpaVals],
+  };
+}
+
+function accumToMetrics(a: CpaLeafAccum): CpaResumenMetrics {
+  const avgGan = a.gananciaVals.length
+    ? a.gananciaVals.reduce((s, x) => s + x, 0) / a.gananciaVals.length
+    : null;
+  const avgC = a.cpaVals.length ? a.cpaVals.reduce((s, x) => s + x, 0) / a.cpaVals.length : null;
+  const cpaPond = a.ventas > 0 ? a.gasto / a.ventas : null;
+  return {
+    sumGasto: a.gasto,
+    sumConversaciones: a.conversaciones,
+    sumVentas: a.ventas,
+    sumUtilidad: a.utilidad,
+    avgGananciaPromedio: avgGan,
+    avgCpa: avgC,
+    cpaPonderado: cpaPond,
+  };
+}
+
+function metricsFromLeaves(leaves: CpaLeafData[]): CpaResumenMetrics {
+  if (leaves.length === 0) {
+    return {
+      sumGasto: 0,
+      sumConversaciones: 0,
+      sumVentas: 0,
+      sumUtilidad: 0,
+      avgGananciaPromedio: null,
+      avgCpa: null,
+      cpaPonderado: null,
+    };
+  }
+  const merged = leaves.reduce((acc, l) => mergeAccum(acc, l.accum), emptyAccum());
+  return accumToMetrics(merged);
+}
+
+function calendarParts(fecha: Date): { y: number; m: number; day: number } {
+  return {
+    y: fecha.getFullYear(),
+    m: fecha.getMonth() + 1,
+    day: fecha.getDate(),
+  };
+}
+
+function buildSemanaNode(semana: string, semLeaves: CpaLeafData[]): CpaResumenNode {
+  const days = [...new Set(semLeaves.map((l) => l.fechaKey))].sort();
+  const children = days.map((d) =>
+    buildDayNode(d, semLeaves.filter((l) => l.fechaKey === d)),
+  );
+  return {
+    tipo: 'semana',
+    key: semana,
+    label: semana,
+    metrics: metricsFromLeaves(semLeaves),
+    children,
+  };
+}
+
+function buildDayNode(fechaKey: string, dayLeaves: CpaLeafData[]): CpaResumenNode {
+  const cuentas = [...new Set(dayLeaves.map((l) => l.cuenta))].sort();
+  const fechaLabel = dayLeaves[0]?.fechaLabel || fechaKey;
+  const children = cuentas.map((c) =>
+    buildCuentaNode(c, dayLeaves.filter((l) => l.cuenta === c)),
+  );
+  return {
+    tipo: 'dia',
+    key: fechaKey,
+    label: fechaLabel,
+    metrics: metricsFromLeaves(dayLeaves),
+    children,
+  };
+}
+
+function buildCuentaNode(cuenta: string, cuentaLeaves: CpaLeafData[]): CpaResumenNode {
+  const prods = [...new Set(cuentaLeaves.map((l) => l.producto))].sort();
+  const children: CpaResumenNode[] = prods.map((p) => {
+    const ls = cuentaLeaves.filter((l) => l.producto === p);
+    return {
+      tipo: 'producto',
+      key: p,
+      label: p,
+      metrics: metricsFromLeaves(ls),
+      children: [],
+    };
+  });
+  return {
+    tipo: 'cuenta',
+    key: cuenta,
+    label: cuenta,
+    metrics: metricsFromLeaves(cuentaLeaves),
+    children,
+  };
+}
+
+function buildMonthNode(mesKey: string, monthLeaves: CpaLeafData[]): CpaResumenNode {
+  const mesLabel = monthLeaves[0]?.mesLabel || mesKey;
+  const semanas = [...new Set(monthLeaves.map((l) => l.semana))].sort((a, b) => {
+    const fa =
+      monthLeaves.filter((l) => l.semana === a).map((l) => l.fechaKey).sort()[0] || '';
+    const fb =
+      monthLeaves.filter((l) => l.semana === b).map((l) => l.fechaKey).sort()[0] || '';
+    return fa.localeCompare(fb);
+  });
+  const children = semanas.map((s) =>
+    buildSemanaNode(s, monthLeaves.filter((l) => l.semana === s)),
+  );
+  return {
+    tipo: 'mes',
+    key: mesKey,
+    label: mesLabel,
+    metrics: metricsFromLeaves(monthLeaves),
+    children,
+  };
+}
+
+function buildResumenTree(leaves: CpaLeafData[]): CpaResumenDiarioResponse {
+  const total = metricsFromLeaves(leaves);
+  const mesKeys = [...new Set(leaves.map((l) => l.mesKey))].sort();
+  const nodes: CpaResumenNode[] = mesKeys.map((mk) =>
+    buildMonthNode(mk, leaves.filter((l) => l.mesKey === mk)),
+  );
+  return { total, nodes };
+}
 
 @Injectable()
 export class CpaService {
@@ -247,5 +444,56 @@ export class CpaService {
       totalConversacionesCpa: Number(result.total_conversaciones || 0),
       dailyCpa: daily,
     };
+  }
+
+  async getResumenDiario(params: {
+    startDate?: string;
+    endDate?: string;
+    producto?: string;
+  }): Promise<CpaResumenDiarioResponse> {
+    const { startDate, endDate, producto } = params;
+    if (!startDate?.trim() || !endDate?.trim()) {
+      throw new BadRequestException('startDate y endDate son obligatorios (YYYY-MM-DD).');
+    }
+    const qb = this.cpaRepository.createQueryBuilder('cpa');
+    qb.andWhere(sqlCastDateBetween('cpa.fecha'), {
+      startDate: extractCalendarDateParam(startDate),
+      endDate: extractCalendarDateParam(endDate),
+    });
+    if (producto?.trim()) {
+      qb.andWhere('cpa.producto ILIKE :prod', { prod: `%${producto.trim()}%` });
+    }
+    qb.orderBy('cpa.fecha', 'ASC').addOrderBy('cpa.id', 'ASC');
+    const rows = await qb.getMany();
+
+    const mergeMap = new Map<string, CpaLeafData>();
+    for (const row of rows) {
+      if (!row.fecha) continue;
+      const fecha = row.fecha instanceof Date ? row.fecha : new Date(row.fecha);
+      if (Number.isNaN(fecha.getTime())) continue;
+      const p = calendarParts(fecha);
+      const mesKey = `${p.y}-${String(p.m).padStart(2, '0')}`;
+      const mesLabel = `${MESES[p.m - 1]} ${p.y}`;
+      const fechaKey = `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+      const fechaLabel = `${String(p.day).padStart(2, '0')}-${MESES_CORT[p.m - 1]}`;
+      const semana = (row.semana ?? '').trim() || 'Sin semana';
+      const cuenta = (row.cuenta_publicitaria ?? '').trim() || '(Sin cuenta)';
+      const productoN = (row.producto ?? '').trim() || '(Sin producto)';
+      const key = `${mesKey}|${semana}|${fechaKey}|${cuenta}|${productoN}`;
+      const exist = mergeMap.get(key);
+      const accum = addRowToAccum(exist?.accum ?? emptyAccum(), row);
+      mergeMap.set(key, {
+        mesKey,
+        mesLabel,
+        semana,
+        fechaKey,
+        fechaLabel,
+        cuenta,
+        producto: productoN,
+        accum,
+      });
+    }
+    const leaves = [...mergeMap.values()];
+    return buildResumenTree(leaves);
   }
 }

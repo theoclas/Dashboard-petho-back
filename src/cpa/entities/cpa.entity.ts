@@ -24,37 +24,37 @@ export class Cpa {
   cuenta_publicitaria: string;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  gasto_publicidad: number;
+  gasto_publicidad: number | null;
 
   @Column({ type: 'integer', nullable: true })
-  conversaciones: number;
+  conversaciones: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  total_facturado: number;
+  total_facturado: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  ganancia_promedio: number;
+  ganancia_promedio: number | null;
 
   @Column({ type: 'integer', nullable: true })
-  ventas: number;
+  ventas: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  ticket_promedio_producto: number;
+  ticket_promedio_producto: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  cpa: number;
+  cpa: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 4, nullable: true })
-  conversion_rate: number;
+  conversion_rate: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  costo_publicitario: number;
+  costo_publicitario: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 4, nullable: true })
-  rentabilidad: number;
+  rentabilidad: number | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  utilidad_aproximada: number;
+  utilidad_aproximada: number | null;
 
   @CreateDateColumn()
   created_at: Date;

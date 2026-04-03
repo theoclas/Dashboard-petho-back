@@ -502,7 +502,7 @@ export class ImportService {
           fecha,
           producto,
           cuenta_publicitaria,
-          gasto_publicidad: this.toNumber(
+          gasto_publicidad: this.toCpaNullableNumber(
             this.getExcelCell(
               row,
               'GASTO PUBLICIDAD',
@@ -514,17 +514,19 @@ export class ImportService {
               'GASTO PUB',
             ),
           ),
-          conversaciones: this.toNumber(
+          conversaciones: this.toCpaNullableNumber(
             this.getExcelCell(row, 'CONVERSACIONES', 'Conversaciones', 'Conversiones'),
           ),
-          total_facturado: this.toNumber(
+          total_facturado: this.toCpaNullableNumber(
             this.getExcelCell(row, 'TOTAL FACTURADO', 'Total facturado', 'Total Facturado'),
           ),
-          ganancia_promedio: this.toNumber(
+          ganancia_promedio: this.toCpaNullableNumber(
             this.getExcelCell(row, 'GANANCIA PROMEDIO', 'Ganancia promedio', 'Ganancia Promedio'),
           ),
-          ventas: this.toNumber(this.getExcelCell(row, 'VENTAS', 'Ventas', 'Unidades', 'Cantidad ventas')),
-          ticket_promedio_producto: this.toNumber(
+          ventas: this.toCpaNullableNumber(
+            this.getExcelCell(row, 'VENTAS', 'Ventas', 'Unidades', 'Cantidad ventas'),
+          ),
+          ticket_promedio_producto: this.toCpaNullableNumber(
             this.getExcelCell(
               row,
               'TICKET PROMEDIO DE PRODUCTO   ',
@@ -534,15 +536,15 @@ export class ImportService {
               'Ticket Promedio',
             ),
           ),
-          cpa: this.toNumber(this.getExcelCell(row, 'CPA', 'Cpa', 'Costo por adquisición')),
-          conversion_rate: this.toNumber(
+          cpa: this.toCpaNullableNumber(this.getExcelCell(row, 'CPA', 'Cpa', 'Costo por adquisición')),
+          conversion_rate: this.toCpaNullableNumber(
             this.getExcelCell(row, 'CONVERSION RATE', 'Conversion rate', 'Conversion Rate', 'Tasa conversión'),
           ),
-          costo_publicitario: this.toNumber(
+          costo_publicitario: this.toCpaNullableNumber(
             this.getExcelCell(row, 'COSTO PUBLICITARIO', 'Costo publicitario', 'Costo Publicitario'),
           ),
-          rentabilidad: this.toNumber(this.getExcelCell(row, 'RENTABILIDAD', 'Rentabilidad')),
-          utilidad_aproximada: this.toNumber(
+          rentabilidad: this.toCpaNullableNumber(this.getExcelCell(row, 'RENTABILIDAD', 'Rentabilidad')),
+          utilidad_aproximada: this.toCpaNullableNumber(
             this.getExcelCell(
               row,
               'UTILIDAD APROXIMADA',
@@ -782,8 +784,27 @@ export class ImportService {
 
   private toNumber(value: unknown): number | undefined {
     if (value === null || value === undefined) return undefined;
-    const num = Number(value);
-    return isNaN(num) ? undefined : num;
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : undefined;
+    }
+    const str = String(value).trim();
+    if (str === '') return undefined;
+    const num = Number(str);
+    return Number.isNaN(num) ? undefined : num;
+  }
+
+  /**
+   * CPA: celda vacía o no numérica → null en BD (no 0), para no falsear sumas/promedios.
+   */
+  private toCpaNullableNumber(value: unknown): number | null {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    const str = String(value).trim();
+    if (str === '' || str === '-' || str === '—' || /^#N\/A$/i.test(str)) return null;
+    const num = Number(str);
+    return Number.isNaN(num) ? null : num;
   }
 
   /**

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Brackets, In, Repository, SelectQueryBuilder } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { CreateCpaDto } from './dto/create-cpa.dto';
 import { UpdateCpaDto } from './dto/update-cpa.dto';
@@ -33,9 +33,11 @@ function fmtDateCell(d: Date | string | null | undefined): string {
   return x.toISOString().slice(0, 10);
 }
 
-function numCell(v: unknown): number {
+/** Export CPA: null/undefined → celda vacía en Excel (no 0). */
+function exportCpaNumCell(v: unknown): number | string {
+  if (v === null || v === undefined) return '';
   const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) ? n : '';
 }
 
 const MESES = [
@@ -89,10 +91,10 @@ function addRowToAccum(a: CpaLeafAccum, row: Cpa): CpaLeafAccum {
   const g = row.ganancia_promedio != null && !Number.isNaN(Number(row.ganancia_promedio));
   const c = row.cpa != null && !Number.isNaN(Number(row.cpa));
   return {
-    gasto: a.gasto + Number(row.gasto_publicidad ?? 0),
-    conversaciones: a.conversaciones + Number(row.conversaciones ?? 0),
-    ventas: a.ventas + Number(row.ventas ?? 0),
-    utilidad: a.utilidad + Number(row.utilidad_aproximada ?? 0),
+    gasto: a.gasto + (row.gasto_publicidad != null ? Number(row.gasto_publicidad) : 0),
+    conversaciones: a.conversaciones + (row.conversaciones != null ? Number(row.conversaciones) : 0),
+    ventas: a.ventas + (row.ventas != null ? Number(row.ventas) : 0),
+    utilidad: a.utilidad + (row.utilidad_aproximada != null ? Number(row.utilidad_aproximada) : 0),
     gananciaVals: [...a.gananciaVals, ...(g ? [Number(row.ganancia_promedio)] : [])],
     cpaVals: [...a.cpaVals, ...(c ? [Number(row.cpa)] : [])],
   };
@@ -243,27 +245,31 @@ export class CpaService {
   }
 
   async upsert(data: Partial<Cpa>) {
-    if (!data.fecha || !data.producto || !data.cuenta_publicitaria) {
+    if (!data.fecha || !String(data.producto ?? '').trim()) {
       return this.create(data as CreateCpaDto);
     }
 
-    const existing = await this.cpaRepository.findOne({
-      where: {
-        fecha: data.fecha,
-        producto: data.producto,
-        cuenta_publicitaria: data.cuenta_publicitaria,
-      },
-    });
+    const prod = String(data.producto).trim();
+    const rows = await this.cpaRepository
+      .createQueryBuilder('cpa')
+      .where('CAST(cpa.fecha AS date) = CAST(:fd AS date)', { fd: data.fecha })
+      .andWhere('TRIM(cpa.producto) = :prod', { prod })
+      .orderBy('cpa.id', 'ASC')
+      .getMany();
 
-    if (existing) {
-      Object.assign(existing, data);
-      return this.cpaRepository.save(existing);
+    if (rows.length === 0) {
+      return this.create(data as CreateCpaDto);
     }
 
-    return this.create(data as CreateCpaDto);
+    const primary = rows[0];
+    if (rows.length > 1) {
+      await this.cpaRepository.delete({ id: In(rows.slice(1).map((x) => x.id)) });
+    }
+    Object.assign(primary, data);
+    return this.cpaRepository.save(primary);
   }
 
-  /** Clave natural para upsert (fecha calendario local + producto + cuenta). */
+  /** Clave natural para upsert/import: fecha calendario + producto (sin cuenta). */
   private cpaNaturalKey(r: Partial<Cpa>): string {
     const f = r.fecha;
     if (!f) return '';
@@ -272,11 +278,11 @@ export class CpaService {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}|${String(r.producto ?? '').trim()}|${String(r.cuenta_publicitaria ?? '').trim()}`;
+    return `${y}-${m}-${day}|${String(r.producto ?? '').trim()}`;
   }
 
   /**
-   * Import masivo: deduplica por (fecha, producto, cuenta), carga existentes por lotes
+   * Import masivo: deduplica por (fecha, producto), carga existentes por lotes
    * y persiste con pocos round-trips (mismo criterio que upsert manual).
    */
   async bulkUpsertFromImport(records: Partial<Cpa>[]): Promise<number> {
@@ -296,22 +302,46 @@ export class CpaService {
 
     for (let i = 0; i < unique.length; i += CHUNK) {
       const batch = unique.slice(i, i + CHUNK);
-      const where = batch.map((r) => ({
-        fecha: r.fecha as Date,
-        producto: r.producto as string,
-        cuenta_publicitaria: (r.cuenta_publicitaria ?? '') as string,
-      }));
 
-      const existing = await this.cpaRepository.find({ where });
-      const byKey = new Map<string, Cpa>();
+      const qb = this.cpaRepository.createQueryBuilder('cpa');
+      qb.where(
+        new Brackets((qb1) => {
+          batch.forEach((r, idx) => {
+            qb1.orWhere(
+              new Brackets((qb2) => {
+                qb2
+                  .where(`CAST(cpa.fecha AS date) = CAST(:d${idx} AS date)`, { [`d${idx}`]: r.fecha })
+                  .andWhere(`TRIM(cpa.producto) = :p${idx}`, { [`p${idx}`]: String(r.producto ?? '').trim() });
+              }),
+            );
+          });
+        }),
+      );
+
+      const existing = await qb.getMany();
+
+      const byKey = new Map<string, Cpa[]>();
       for (const e of existing) {
-        byKey.set(this.cpaNaturalKey(e), e);
+        const k = this.cpaNaturalKey(e);
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k)!.push(e);
+      }
+
+      const primaryByKey = new Map<string, Cpa>();
+      const duplicateIds: number[] = [];
+      for (const [, arr] of byKey) {
+        arr.sort((a, b) => a.id - b.id);
+        primaryByKey.set(this.cpaNaturalKey(arr[0]), arr[0]);
+        for (let j = 1; j < arr.length; j++) duplicateIds.push(arr[j].id);
+      }
+      if (duplicateIds.length > 0) {
+        await this.cpaRepository.delete({ id: In(duplicateIds) });
       }
 
       const toSave: Cpa[] = [];
       for (const r of batch) {
         const k = this.cpaNaturalKey(r);
-        const hit = byKey.get(k);
+        const hit = primaryByKey.get(k);
         if (hit) {
           Object.assign(hit, r);
           toSave.push(hit);
@@ -403,17 +433,17 @@ export class CpaService {
       Fecha: fmtDateCell(r.fecha),
       Producto: r.producto ?? '',
       'Cuenta publicitaria': r.cuenta_publicitaria ?? '',
-      'Gasto publicidad': numCell(r.gasto_publicidad),
-      Conversaciones: numCell(r.conversaciones),
-      'Total facturado': numCell(r.total_facturado),
-      'Ganancia promedio': numCell(r.ganancia_promedio),
-      Ventas: numCell(r.ventas),
-      'Ticket promedio producto': numCell(r.ticket_promedio_producto),
-      CPA: numCell(r.cpa),
-      'Conversion rate': numCell(r.conversion_rate),
-      'Costo publicitario': numCell(r.costo_publicitario),
-      Rentabilidad: numCell(r.rentabilidad),
-      'Utilidad aproximada': numCell(r.utilidad_aproximada),
+      'Gasto publicidad': exportCpaNumCell(r.gasto_publicidad),
+      Conversaciones: exportCpaNumCell(r.conversaciones),
+      'Total facturado': exportCpaNumCell(r.total_facturado),
+      'Ganancia promedio': exportCpaNumCell(r.ganancia_promedio),
+      Ventas: exportCpaNumCell(r.ventas),
+      'Ticket promedio producto': exportCpaNumCell(r.ticket_promedio_producto),
+      CPA: exportCpaNumCell(r.cpa),
+      'Conversion rate': exportCpaNumCell(r.conversion_rate),
+      'Costo publicitario': exportCpaNumCell(r.costo_publicitario),
+      Rentabilidad: exportCpaNumCell(r.rentabilidad),
+      'Utilidad aproximada': exportCpaNumCell(r.utilidad_aproximada),
     }));
 
     const ws = XLSX.utils.json_to_sheet(sheetRows);

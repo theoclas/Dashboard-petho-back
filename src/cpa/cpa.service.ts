@@ -42,6 +42,72 @@ export class CpaService {
     return this.create(data as CreateCpaDto);
   }
 
+  /** Clave natural para upsert (fecha calendario local + producto + cuenta). */
+  private cpaNaturalKey(r: Partial<Cpa>): string {
+    const f = r.fecha;
+    if (!f) return '';
+    const d = f instanceof Date ? f : new Date(f);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}|${String(r.producto ?? '').trim()}|${String(r.cuenta_publicitaria ?? '').trim()}`;
+  }
+
+  /**
+   * Import masivo: deduplica por (fecha, producto, cuenta), carga existentes por lotes
+   * y persiste con pocos round-trips (mismo criterio que upsert manual).
+   */
+  async bulkUpsertFromImport(records: Partial<Cpa>[]): Promise<number> {
+    if (records.length === 0) return 0;
+
+    const merged = new Map<string, Partial<Cpa>>();
+    for (const r of records) {
+      const k = this.cpaNaturalKey(r);
+      if (!k) continue;
+      const prev = merged.get(k);
+      merged.set(k, prev ? { ...prev, ...r } : { ...r });
+    }
+
+    const unique = [...merged.values()];
+    const CHUNK = 120;
+    let persisted = 0;
+
+    for (let i = 0; i < unique.length; i += CHUNK) {
+      const batch = unique.slice(i, i + CHUNK);
+      const where = batch.map((r) => ({
+        fecha: r.fecha as Date,
+        producto: r.producto as string,
+        cuenta_publicitaria: (r.cuenta_publicitaria ?? '') as string,
+      }));
+
+      const existing = await this.cpaRepository.find({ where });
+      const byKey = new Map<string, Cpa>();
+      for (const e of existing) {
+        byKey.set(this.cpaNaturalKey(e), e);
+      }
+
+      const toSave: Cpa[] = [];
+      for (const r of batch) {
+        const k = this.cpaNaturalKey(r);
+        const hit = byKey.get(k);
+        if (hit) {
+          Object.assign(hit, r);
+          toSave.push(hit);
+        } else {
+          toSave.push(this.cpaRepository.create(r as CreateCpaDto));
+        }
+      }
+
+      if (toSave.length > 0) {
+        await this.cpaRepository.save(toSave);
+        persisted += toSave.length;
+      }
+    }
+
+    return persisted;
+  }
+
   private readonly cpaSortableFields = [
     'id',
     'semana',

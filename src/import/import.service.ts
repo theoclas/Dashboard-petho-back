@@ -14,6 +14,7 @@ import { MapeoEstadosService } from '../mapeo-estados/mapeo-estados.service';
 import { NotasService } from '../notas/notas.service';
 import { ProductosDetalleService } from '../productos-detalle/productos-detalle.service';
 import { CpaService } from '../cpa/cpa.service';
+import { Cpa } from '../cpa/entities/cpa.entity';
 import { Pedido } from '../pedidos/entities/pedido.entity';
 import { ProductoDetalle } from '../productos-detalle/entities/producto-detalle.entity';
 import { CarteraMovimiento } from '../cartera/entities/cartera-movimiento.entity';
@@ -415,63 +416,133 @@ export class ImportService {
   }
 
   /**
-   * OPTIMIZADO: Importa CPA acumulando todos los registros y haciendo bulk insert.
+   * OPTIMIZADO: CPA con cabeceras flexibles, varias hojas posibles y persistencia por lotes
+   * (bulkUpsertFromImport), sin un round-trip a BD por fila.
    */
   async importCpa(
     buffer: Buffer,
   ): Promise<{ imported: number; errors: string[] }> {
     const wb = XLSX.read(buffer, { type: 'buffer' });
     const sheetName =
-      wb.SheetNames.find((s) => s === 'INPUT_DATA') || wb.SheetNames[0];
-    const ws = wb.Sheets[sheetName];
+      wb.SheetNames.find((s) => s.toLowerCase().replace(/\s+/g, '_') === 'input_data') ||
+      wb.SheetNames.find((s) => s === 'Sheet1') ||
+      wb.SheetNames[0];
+    const ws = sheetName ? wb.Sheets[sheetName] : undefined;
 
-    if (!ws) throw new BadRequestException('No se encontró la hoja INPUT_DATA');
+    if (!ws) {
+      throw new BadRequestException(
+        `No se encontró una hoja válida en el Excel. Hojas: ${wb.SheetNames.join(', ')}`,
+      );
+    }
 
     const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, {
       defval: null,
     });
 
-    this.logger.log(`Procesando ${rows.length} filas de CPA...`);
+    this.logger.log(`CPA: hoja "${sheetName}", ${rows.length} filas (cabeceras flexibles + bulk upsert)...`);
 
     const errors: string[] = [];
-    let imported = 0;
+    const toImport: Partial<Cpa>[] = [];
 
-    // Insertar uno a uno manteniendo la lógica de upsert de CPA
-    // (CPA tiene clave compuesta fecha+producto+cuenta_publicitaria, más difícil de bulk)
-    for (const row of rows) {
+    for (let idx = 0; idx < rows.length; idx++) {
+      const row = rows[idx];
+      const excelRow = idx + 2;
+
       try {
-        const fecha = this.parseDate(row['Fecha']);
-        const producto = this.toString(row['Producto']);
+        const fecha = this.parseDate(
+          this.getExcelCell(row, 'Fecha', 'FECHA', 'Date', 'DATE', 'Día', 'Dia'),
+        );
+        const producto = this.toString(
+          this.getExcelCell(row, 'Producto', 'PRODUCTO', 'Product', 'SKU', 'Nombre producto'),
+        );
 
         if (!fecha && !producto) continue;
+        if (!fecha || !producto) {
+          errors.push(`Fila ${excelRow}: se requieren fecha y producto`);
+          continue;
+        }
 
-        const cpaData = {
-          semana: this.toString(row['SEMANA']),
-          fecha: fecha,
-          producto: producto,
-          cuenta_publicitaria: this.toString(row['Cuenta publicitaria']),
-          gasto_publicidad: this.toNumber(row['GASTO PUBLICIDAD']),
-          conversaciones: this.toNumber(row['CONVERSACIONES']),
-          total_facturado: this.toNumber(row['TOTAL FACTURADO']),
-          ganancia_promedio: this.toNumber(row['GANANCIA PROMEDIO']),
-          ventas: this.toNumber(row['VENTAS']),
-          ticket_promedio_producto: this.toNumber(row['TICKET PROMEDIO DE PRODUCTO   ']),
-          cpa: this.toNumber(row['CPA']),
-          conversion_rate: this.toNumber(row['CONVERSION RATE']),
-          costo_publicitario: this.toNumber(row['COSTO PUBLICITARIO']),
-          rentabilidad: this.toNumber(row['RENTABILIDAD']),
-          utilidad_aproximada: this.toNumber(row['UTILIDAD APROXIMADA']),
+        const cuentaRaw = this.toString(
+          this.getExcelCell(
+            row,
+            'Cuenta publicitaria',
+            'Cuenta Publicitaria',
+            'CUENTA PUBLICITARIA',
+            'Cuenta',
+            'CUENTA',
+            'Cuenta pub',
+            'Cuenta Pub.',
+            'Account',
+          ),
+        );
+        const cuenta_publicitaria = cuentaRaw ?? '';
+
+        const cpaData: Partial<Cpa> = {
+          semana: this.toString(this.getExcelCell(row, 'SEMANA', 'Semana', 'Week', 'Semana mes')),
+          fecha,
+          producto,
+          cuenta_publicitaria,
+          gasto_publicidad: this.toNumber(
+            this.getExcelCell(
+              row,
+              'GASTO PUBLICIDAD',
+              'Gasto publicidad',
+              'Gasto Publicidad',
+              'Gasto pub',
+              'Gasto Pub.',
+              'Gasto Pub',
+              'GASTO PUB',
+            ),
+          ),
+          conversaciones: this.toNumber(
+            this.getExcelCell(row, 'CONVERSACIONES', 'Conversaciones', 'Conversiones'),
+          ),
+          total_facturado: this.toNumber(
+            this.getExcelCell(row, 'TOTAL FACTURADO', 'Total facturado', 'Total Facturado'),
+          ),
+          ganancia_promedio: this.toNumber(
+            this.getExcelCell(row, 'GANANCIA PROMEDIO', 'Ganancia promedio', 'Ganancia Promedio'),
+          ),
+          ventas: this.toNumber(this.getExcelCell(row, 'VENTAS', 'Ventas', 'Unidades', 'Cantidad ventas')),
+          ticket_promedio_producto: this.toNumber(
+            this.getExcelCell(
+              row,
+              'TICKET PROMEDIO DE PRODUCTO   ',
+              'TICKET PROMEDIO DE PRODUCTO',
+              'Ticket promedio de producto',
+              'Ticket promedio producto',
+              'Ticket Promedio',
+            ),
+          ),
+          cpa: this.toNumber(this.getExcelCell(row, 'CPA', 'Cpa', 'Costo por adquisición')),
+          conversion_rate: this.toNumber(
+            this.getExcelCell(row, 'CONVERSION RATE', 'Conversion rate', 'Conversion Rate', 'Tasa conversión'),
+          ),
+          costo_publicitario: this.toNumber(
+            this.getExcelCell(row, 'COSTO PUBLICITARIO', 'Costo publicitario', 'Costo Publicitario'),
+          ),
+          rentabilidad: this.toNumber(this.getExcelCell(row, 'RENTABILIDAD', 'Rentabilidad')),
+          utilidad_aproximada: this.toNumber(
+            this.getExcelCell(
+              row,
+              'UTILIDAD APROXIMADA',
+              'Utilidad aproximada',
+              'Utilidad Aproximada',
+              'UTILIDAD APROX',
+            ),
+          ),
         };
 
-        await this.cpaService.upsert(cpaData);
-        imported++;
+        toImport.push(cpaData);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Fila CPA con Producto ${row['Producto']}: ${msg}`);
+        errors.push(`Fila ${excelRow}: ${msg}`);
       }
     }
 
-    this.logger.log(`CPA importado: ${imported}. Errores: ${errors.length}`);
+    const imported = await this.cpaService.bulkUpsertFromImport(toImport);
+
+    this.logger.log(`CPA importado: ${imported} registros. Errores de fila: ${errors.length}`);
     return { imported, errors };
   }
 
@@ -657,6 +728,33 @@ export class ImportService {
 
   // ─── Utilidades de parsing ────────────────────────────────────
 
+  /** Normaliza cabeceras de Excel para coincidir aunque cambien mayúsculas, espacios o acentos. */
+  private normalizeExcelHeaderKey(header: string): string {
+    return header
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/\u00A0/g, ' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /** Busca el primer valor no vacío entre columnas cuyo nombre coincide con algún alias. */
+  private getExcelCell(row: Record<string, unknown>, ...headerAliases: string[]): unknown {
+    const map = new Map<string, unknown>();
+    for (const [k, v] of Object.entries(row)) {
+      map.set(this.normalizeExcelHeaderKey(k), v);
+    }
+    for (const alias of headerAliases) {
+      const key = this.normalizeExcelHeaderKey(alias);
+      const v = map.get(key);
+      if (v !== undefined && v !== null && String(v).trim() !== '') {
+        return v;
+      }
+    }
+    return undefined;
+  }
+
   private toString(value: unknown): string | undefined {
     if (value === null || value === undefined) return undefined;
     return String(value).trim() || undefined;
@@ -680,6 +778,24 @@ export class ImportService {
 
     const str = String(value).trim();
     if (!str) return undefined;
+
+    const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s]|$)/);
+    if (iso) {
+      const y = parseInt(iso[1], 10);
+      const mo = parseInt(iso[2], 10);
+      const d = parseInt(iso[3], 10);
+      const date = new Date(y, mo - 1, d);
+      if (!isNaN(date.getTime())) return date;
+    }
+
+    const slash = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (slash) {
+      const day = parseInt(slash[1], 10);
+      const month = parseInt(slash[2], 10);
+      const year = parseInt(slash[3], 10);
+      const date = new Date(year, month - 1, day);
+      if (!isNaN(date.getTime())) return date;
+    }
 
     const parts = str.split('-');
     if (parts.length === 3) {

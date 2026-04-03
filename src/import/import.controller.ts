@@ -77,4 +77,11 @@ export class ImportController {
   async wipeImportedTables(@Body() dto: WipeImportedDto) {
     return this.importService.wipeImportedTables(dto.password);
   }
+
+  /** Solo ADMIN: vacía la tabla cpas (misma contraseña IMPORT_WIPE_SECRET). */
+  @Post('wipe-cpa')
+  @Roles(UserRole.ADMIN)
+  async wipeCpa(@Body() dto: WipeImportedDto) {
+    return this.importService.wipeCpaTable(dto.password);
+  }
 }

@@ -37,6 +37,21 @@ export class ImportService {
     return crypto.createHash('sha256').update(plain, 'utf8').digest();
   }
 
+  /** Misma clave que IMPORT_WIPE_SECRET (hash SHA-256, comparación timing-safe). */
+  private assertWipePassword(password: string): void {
+    const configured = process.env.IMPORT_WIPE_SECRET?.trim();
+    if (!configured) {
+      throw new ForbiddenException(
+        'Limpieza deshabilitada: define IMPORT_WIPE_SECRET en el servidor.',
+      );
+    }
+    const a = this.hashWipeSecret(password);
+    const b = this.hashWipeSecret(configured);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      throw new UnauthorizedException('Contraseña incorrecta');
+    }
+  }
+
   /**
    * Vacía tablas cargadas por import (pedidos, líneas de producto, movimientos de cartera).
    * Requiere IMPORT_WIPE_SECRET en .env y contraseña idéntica (comparación por hash, timing-safe).
@@ -49,17 +64,7 @@ export class ImportService {
       pedidos: number;
     };
   }> {
-    const configured = process.env.IMPORT_WIPE_SECRET?.trim();
-    if (!configured) {
-      throw new ForbiddenException(
-        'Limpieza deshabilitada: define IMPORT_WIPE_SECRET en el servidor.',
-      );
-    }
-    const a = this.hashWipeSecret(password);
-    const b = this.hashWipeSecret(configured);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-      throw new UnauthorizedException('Contraseña incorrecta');
-    }
+    this.assertWipePassword(password);
 
     return this.dataSource.transaction(async (manager) => {
       const nPd = await manager.count(ProductoDetalle);
@@ -81,6 +86,21 @@ export class ImportService {
           pedidos: nPe,
         },
       };
+    });
+  }
+
+  /**
+   * Elimina todos los registros de la tabla cpas.
+   * Usa la misma contraseña que IMPORT_WIPE_SECRET (igual que wipe-imported-tables).
+   */
+  async wipeCpaTable(password: string): Promise<{ deleted: number }> {
+    this.assertWipePassword(password);
+
+    return this.dataSource.transaction(async (manager) => {
+      const n = await manager.count(Cpa);
+      await manager.createQueryBuilder().delete().from(Cpa).execute();
+      this.logger.warn(`WIPE tabla cpas: ${n} filas eliminadas`);
+      return { deleted: n };
     });
   }
 

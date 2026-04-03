@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import * as XLSX from 'xlsx';
 import { CreateCpaDto } from './dto/create-cpa.dto';
 import { UpdateCpaDto } from './dto/update-cpa.dto';
 import { Cpa } from './entities/cpa.entity';
@@ -13,6 +14,29 @@ import type {
   CpaResumenMetrics,
   CpaResumenNode,
 } from './dto/cpa-resumen-diario.dto';
+
+/** Filtros y orden compartidos entre GET /cpa y exportación Excel. */
+export type CpaListQuery = {
+  producto?: string;
+  sortField?: string;
+  sortOrder?: 'ASC' | 'DESC';
+  startDate?: string;
+  endDate?: string;
+};
+
+const EXPORT_MAX_ROWS = 50_000;
+
+function fmtDateCell(d: Date | string | null | undefined): string {
+  if (d == null) return '';
+  const x = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(x.getTime())) return '';
+  return x.toISOString().slice(0, 10);
+}
+
+function numCell(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 const MESES = [
   'ENERO',
@@ -324,27 +348,85 @@ export class CpaService {
     'utilidad_aproximada',
   ] as const;
 
-  async findAll(query?: {
-    producto?: string;
-    sortField?: string;
-    sortOrder?: 'ASC' | 'DESC';
-  }): Promise<Cpa[]> {
+  private createCpaListQueryBuilder(query?: CpaListQuery): SelectQueryBuilder<Cpa> {
     const qb = this.cpaRepository.createQueryBuilder('cpa');
     if (query?.producto?.trim()) {
       qb.andWhere('cpa.producto ILIKE :prod', {
         prod: `%${query.producto.trim()}%`,
       });
     }
+    if (query?.startDate && query?.endDate) {
+      qb.andWhere(sqlCastDateBetween('cpa.fecha'), {
+        startDate: extractCalendarDateParam(query.startDate),
+        endDate: extractCalendarDateParam(query.endDate),
+      });
+    }
     const sortField = query?.sortField || 'fecha';
     const sortOrder = query?.sortOrder === 'ASC' ? 'ASC' : 'DESC';
-    const field = this.cpaSortableFields.includes(sortField as (typeof this.cpaSortableFields)[number])
+    const sortableFields = this.cpaSortableFields;
+    const field = sortableFields.includes(sortField as (typeof sortableFields)[number])
       ? `cpa.${sortField}`
       : 'cpa.fecha';
     qb.orderBy(field, sortOrder);
     if (field !== 'cpa.id') {
       qb.addOrderBy('cpa.id', 'DESC');
     }
-    return qb.getMany();
+    return qb;
+  }
+
+  async findAll(query?: CpaListQuery): Promise<Cpa[]> {
+    return this.createCpaListQueryBuilder(query).getMany();
+  }
+
+  /**
+   * Exporta a Excel los registros CPA con los mismos filtros que el listado (sin paginación).
+   * Máximo {@link EXPORT_MAX_ROWS} filas; si hay más coincidencias, se trunca.
+   */
+  async exportCpaExcel(query?: CpaListQuery): Promise<{
+    buffer: Buffer;
+    rowCount: number;
+    totalMatching: number;
+    truncated: boolean;
+  }> {
+    const countQb = this.createCpaListQueryBuilder(query);
+    const totalMatching = await countQb.getCount();
+
+    const qb = this.createCpaListQueryBuilder(query);
+    qb.take(EXPORT_MAX_ROWS);
+    const rows = await qb.getMany();
+
+    const truncated = totalMatching > EXPORT_MAX_ROWS;
+
+    const sheetRows = rows.map((r) => ({
+      ID: r.id,
+      Semana: r.semana ?? '',
+      Fecha: fmtDateCell(r.fecha),
+      Producto: r.producto ?? '',
+      'Cuenta publicitaria': r.cuenta_publicitaria ?? '',
+      'Gasto publicidad': numCell(r.gasto_publicidad),
+      Conversaciones: numCell(r.conversaciones),
+      'Total facturado': numCell(r.total_facturado),
+      'Ganancia promedio': numCell(r.ganancia_promedio),
+      Ventas: numCell(r.ventas),
+      'Ticket promedio producto': numCell(r.ticket_promedio_producto),
+      CPA: numCell(r.cpa),
+      'Conversion rate': numCell(r.conversion_rate),
+      'Costo publicitario': numCell(r.costo_publicitario),
+      Rentabilidad: numCell(r.rentabilidad),
+      'Utilidad aproximada': numCell(r.utilidad_aproximada),
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(sheetRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'CPA');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    return {
+      buffer,
+      rowCount: rows.length,
+      totalMatching,
+      truncated,
+    };
   }
 
   /** Nombres de producto distintos en CPA (para filtros en UI). */

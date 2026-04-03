@@ -527,15 +527,25 @@ export class CpaService {
       .addSelect('SUM(cpa.utilidad_aproximada)', 'total_utilidad')
       .addSelect('SUM(cpa.ventas)', 'total_ventas')
       .addSelect('SUM(cpa.conversaciones)', 'total_conversaciones')
+      .addSelect(
+        `AVG(cpa.cpa) FILTER (WHERE cpa.cpa IS NOT NULL AND NOT (
+          COALESCE(cpa.gasto_publicidad,0) = 0 AND COALESCE(cpa.ventas,0) = 0 AND COALESCE(cpa.cpa,0) = 0
+          AND COALESCE(cpa.utilidad_aproximada,0) = 0 AND COALESCE(cpa.conversaciones,0) = 0
+          AND COALESCE(cpa.ganancia_promedio,0) = 0
+        ))`,
+        'avg_cpa',
+      )
       .getRawOne();
 
     /**
-     * CPA agregado: gasto ÷ ventas en el rango (ponderado).
-     * No usar SUM(cpa): cada fila ya es un CPA por cuenta/día; sumarlos no tiene sentido económico.
+     * CPA ponderado: Σ gasto ÷ Σ ventas (como “CPA pond.” en resumen diario).
+     * CPA promedio: AVG(cpa) por fila excl. null y filas placeholder (como “CPA prom.” / Excel).
      */
     const totalGasto = Number(result.total_gasto_publicidad || 0);
     const totalVentasCpa = Number(result.total_ventas || 0);
-    const totalCpaWeighted = totalVentasCpa > 0 ? totalGasto / totalVentasCpa : 0;
+    const totalCpaPonderado = totalVentasCpa > 0 ? totalGasto / totalVentasCpa : 0;
+    const cpaPromedio =
+      result.avg_cpa != null && result.avg_cpa !== '' ? Number(result.avg_cpa) : null;
 
     const dailyResult = await dailyQb
       .select('DATE(cpa.fecha)', 'date')
@@ -570,7 +580,10 @@ export class CpaService {
     }).filter((d) => Boolean(d.date));
 
     return {
-      totalCpa: totalCpaWeighted,
+      /** @deprecated Usar cpaPromedio; se mantiene = cpaPromedio para compat. */
+      totalCpa: cpaPromedio ?? totalCpaPonderado,
+      cpaPromedio,
+      cpaPonderado: totalCpaPonderado,
       totalGasto,
       totalUtilidadCpa: Number(result.total_utilidad || 0),
       totalVentasCpa,

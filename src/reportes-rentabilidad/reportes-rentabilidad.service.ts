@@ -79,7 +79,24 @@ export class ReportesRentabilidadService {
     const limitPh = push(params.limit);
     const offsetPh = push(offset);
 
+    /**
+     * Universo de filas = productos que aparecen en CPA (mismo rango de fechas que pedidos cuando aplica).
+     * Nombre mostrado = texto CPA (MIN estable por pk). Pauta = suma gasto CPA.
+     * Métricas logística/ventas/utilidad = agregado desde pedidos filas cuyo nombre Dropi coincide con CPA:
+     * igualdad LOWER(TRIM) o el pk CPA está contenido en el nombre pedido (POSITION); si varios CPA encajan,
+     * gana el pk más largo para reducir dobles conteos.
+     */
     const cte = `
+      cpa_products AS (
+        SELECT
+          LOWER(TRIM(cpa.producto)) AS pk,
+          MIN(TRIM(cpa.producto)) AS nombre_display,
+          SUM(COALESCE(cpa.gasto_publicidad, 0))::numeric AS pauta_total
+        FROM cpas cpa
+        WHERE cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''
+          ${dateCondCpa}
+        GROUP BY LOWER(TRIM(cpa.producto))
+      ),
       pedido_producto AS (
         SELECT DISTINCT ON (TRIM(pd.producto_nombre), p.id_dropi)
           TRIM(pd.producto_nombre) AS producto,
@@ -105,35 +122,60 @@ export class ReportesRentabilidadService {
         FROM pedido_producto
         GROUP BY producto
       ),
-      pauta_agg AS (
-        SELECT LOWER(TRIM(cpa.producto)) AS pk, SUM(COALESCE(cpa.gasto_publicidad, 0))::numeric AS pauta_total
-        FROM cpas cpa
-        WHERE cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''
-          ${dateCondCpa}
-        GROUP BY LOWER(TRIM(cpa.producto))
+      agg_mapped AS (
+        SELECT
+          a.producto,
+          a.enviados,
+          a.transito,
+          a.devoluciones,
+          a.entregados,
+          a.ventas,
+          a.utilidad,
+          (
+            SELECT cp.pk
+            FROM cpa_products cp
+            WHERE cp.pk = LOWER(TRIM(a.producto))
+               OR POSITION(cp.pk IN LOWER(TRIM(a.producto))) > 0
+            ORDER BY LENGTH(cp.pk) DESC
+            LIMIT 1
+          ) AS cpa_pk
+        FROM agg a
+      ),
+      agg_by_cpa AS (
+        SELECT
+          cpa_pk,
+          SUM(enviados)::int AS enviados,
+          SUM(transito)::int AS transito,
+          SUM(devoluciones)::int AS devoluciones,
+          SUM(entregados)::int AS entregados,
+          SUM(ventas)::numeric AS ventas,
+          SUM(utilidad)::numeric AS utilidad
+        FROM agg_mapped
+        WHERE cpa_pk IS NOT NULL
+        GROUP BY cpa_pk
       ),
       final AS (
         SELECT
-          agg.producto,
-          agg.entregados AS entr,
-          agg.transito AS tran,
-          agg.devoluciones AS dev,
-          agg.enviados,
-          agg.ventas,
-          COALESCE(pauta_agg.pauta_total, 0)::numeric AS pauta,
-          agg.utilidad,
-          CASE WHEN agg.enviados > 0
-            THEN ROUND((agg.entregados::numeric / agg.enviados) * 1000) / 10
+          cp.nombre_display AS producto,
+          COALESCE(ab.entregados, 0)::int AS entr,
+          COALESCE(ab.transito, 0)::int AS tran,
+          COALESCE(ab.devoluciones, 0)::int AS dev,
+          COALESCE(ab.enviados, 0)::int AS enviados,
+          COALESCE(ab.ventas, 0)::numeric AS ventas,
+          cp.pauta_total::numeric AS pauta,
+          COALESCE(ab.utilidad, 0)::numeric AS utilidad,
+          CASE WHEN COALESCE(ab.enviados, 0) > 0
+            THEN ROUND((COALESCE(ab.entregados, 0)::numeric / ab.enviados) * 1000) / 10
             ELSE 0 END AS pct_efectividad,
-          CASE WHEN agg.enviados > 0
-            THEN ROUND((agg.transito::numeric / agg.enviados) * 1000) / 10
+          CASE WHEN COALESCE(ab.enviados, 0) > 0
+            THEN ROUND((COALESCE(ab.transito, 0)::numeric / ab.enviados) * 1000) / 10
             ELSE 0 END AS pct_transito,
-          CASE WHEN agg.enviados > 0
-            THEN ROUND((agg.devoluciones::numeric / agg.enviados) * 1000) / 10
+          CASE WHEN COALESCE(ab.enviados, 0) > 0
+            THEN ROUND((COALESCE(ab.devoluciones, 0)::numeric / ab.enviados) * 1000) / 10
             ELSE 0 END AS pct_devolucion
-        FROM agg
-        LEFT JOIN pauta_agg ON LOWER(TRIM(agg.producto)) = pauta_agg.pk
-        WHERE agg.producto ILIKE ${ilikePh}
+        FROM cpa_products cp
+        LEFT JOIN agg_by_cpa ab ON ab.cpa_pk = cp.pk
+        WHERE cp.nombre_display ILIKE ${ilikePh}
       )
     `;
 

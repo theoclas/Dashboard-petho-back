@@ -17,11 +17,65 @@ export type PedidoListQuery = {
   transportadora?: string;
   ciudad?: string;
   id_dropi?: string;
+  cliente?: string;
+  telefono?: string;
+  guia?: string;
+  departamento?: string;
+  direccion?: string;
+  notas?: string;
+  notas_manuales?: string;
+  producto?: string;
+  estado_operativo?: string;
+  estado_cartera?: string;
+  estatus_original?: string;
+  ultimo_mov?: string;
+  /** Búsqueda por texto en el número (CAST a texto). */
+  venta?: string;
+  ganancia_calc?: string;
+  flete?: string;
+  cartera?: string;
+  costo_proveedor?: string;
+  costo_devolucion_estimado?: string;
+  dias_desde_ult_mov?: string;
   sortField?: string;
   sortOrder?: 'ASC' | 'DESC';
   startDate?: string;
   endDate?: string;
+  /** Subcadena en fecha (CAST a texto; combinable con rango). */
+  fecha_contains?: string;
 };
+
+const PEDIDO_SORTABLE_FIELDS = [
+  'id',
+  'id_dropi',
+  'fecha',
+  'cliente',
+  'telefono',
+  'transportadora',
+  'estado_operativo',
+  'guia',
+  'departamento',
+  'ciudad',
+  'direccion',
+  'notas',
+  'producto',
+  'venta',
+  'ganancia_calc',
+  'flete',
+  'costo_proveedor',
+  'costo_devolucion_estimado',
+  'cartera',
+  'cartera_aplicada',
+  'fecha_ult_mov',
+  'dias_desde_ult_mov',
+  'ultimo_mov',
+  'estatus_original',
+  'estado_unificado',
+  'estado_cartera',
+  'notas_manuales',
+  'created_at',
+  'updated_at',
+] as const;
 
 const EXPORT_MAX_ROWS = 50_000;
 
@@ -85,6 +139,28 @@ export class PedidosService {
     return qb;
   }
 
+  private applyIlike(
+    qb: SelectQueryBuilder<Pedido>,
+    value: string | undefined,
+    column: string,
+    param: string,
+  ): void {
+    const t = value?.trim();
+    if (!t) return;
+    qb.andWhere(`${column} ILIKE :${param}`, { [param]: `%${t}%` });
+  }
+
+  private applyNumericTextSearch(
+    qb: SelectQueryBuilder<Pedido>,
+    value: string | undefined,
+    column: string,
+    param: string,
+  ): void {
+    const t = value?.trim();
+    if (!t) return;
+    qb.andWhere(`CAST(${column} AS TEXT) ILIKE :${param}`, { [param]: `%${t}%` });
+  }
+
   private applyPedidoFilters(qb: SelectQueryBuilder<Pedido>, query?: PedidoListQuery): void {
     if (query?.startDate && query?.endDate) {
       qb.andWhere(sqlCastDateBetween('pedido.fecha'), {
@@ -93,27 +169,45 @@ export class PedidosService {
       });
     }
 
-    if (query?.estado_unificado) {
-      qb.andWhere('pedido.estado_unificado ILIKE :estado', {
-        estado: `%${query.estado_unificado}%`,
-      });
-    }
+    this.applyIlike(qb, query?.estado_unificado, 'pedido.estado_unificado', 'estado');
+    this.applyIlike(qb, query?.transportadora, 'pedido.transportadora', 'transportadora');
+    this.applyIlike(qb, query?.id_dropi, 'pedido.id_dropi', 'id_dropi');
+    this.applyIlike(qb, query?.ciudad, 'pedido.ciudad', 'ciudad');
+    this.applyIlike(qb, query?.cliente, 'pedido.cliente', 'cliente');
+    this.applyIlike(qb, query?.telefono, 'pedido.telefono', 'telefono');
+    this.applyIlike(qb, query?.guia, 'pedido.guia', 'guia');
+    this.applyIlike(qb, query?.departamento, 'pedido.departamento', 'departamento');
+    this.applyIlike(qb, query?.direccion, 'pedido.direccion', 'direccion');
+    this.applyIlike(qb, query?.notas, 'pedido.notas', 'notas');
+    this.applyIlike(qb, query?.notas_manuales, 'pedido.notas_manuales', 'notas_manuales');
+    this.applyIlike(qb, query?.producto, 'pedido.producto', 'producto');
+    this.applyIlike(qb, query?.estado_operativo, 'pedido.estado_operativo', 'estado_operativo');
+    this.applyIlike(qb, query?.estado_cartera, 'pedido.estado_cartera', 'estado_cartera');
+    this.applyIlike(qb, query?.estatus_original, 'pedido.estatus_original', 'estatus_original');
+    this.applyIlike(qb, query?.ultimo_mov, 'pedido.ultimo_mov', 'ultimo_mov');
 
-    if (query?.transportadora) {
-      qb.andWhere('pedido.transportadora ILIKE :transportadora', {
-        transportadora: `%${query.transportadora}%`,
-      });
-    }
+    this.applyNumericTextSearch(qb, query?.venta, 'pedido.venta', 'venta_txt');
+    this.applyNumericTextSearch(qb, query?.ganancia_calc, 'pedido.ganancia_calc', 'ganancia_txt');
+    this.applyNumericTextSearch(qb, query?.flete, 'pedido.flete', 'flete_txt');
+    this.applyNumericTextSearch(qb, query?.cartera, 'pedido.cartera', 'cartera_txt');
+    this.applyNumericTextSearch(qb, query?.costo_proveedor, 'pedido.costo_proveedor', 'costo_prov_txt');
+    this.applyNumericTextSearch(
+      qb,
+      query?.costo_devolucion_estimado,
+      'pedido.costo_devolucion_estimado',
+      'costo_dev_txt',
+    );
+    this.applyNumericTextSearch(
+      qb,
+      query?.dias_desde_ult_mov,
+      'pedido.dias_desde_ult_mov',
+      'dias_mov_txt',
+    );
 
-    if (query?.id_dropi) {
-      qb.andWhere('pedido.id_dropi ILIKE :id_dropi', {
-        id_dropi: `%${query.id_dropi}%`,
-      });
-    }
-
-    if (query?.ciudad) {
-      qb.andWhere('pedido.ciudad ILIKE :ciudad', {
-        ciudad: `%${query.ciudad}%`,
+    const fc = query?.fecha_contains?.trim();
+    if (fc) {
+      qb.andWhere(`CAST(pedido.fecha AS TEXT) ILIKE :fecha_contains`, {
+        fecha_contains: `%${fc}%`,
       });
     }
   }
@@ -121,18 +215,8 @@ export class PedidosService {
   private applyPedidoOrder(qb: SelectQueryBuilder<Pedido>, query?: PedidoListQuery): void {
     const sortField = query?.sortField || 'id';
     const sortOrder = query?.sortOrder || 'DESC';
-    const allowedFields = [
-      'id',
-      'id_dropi',
-      'fecha',
-      'ciudad',
-      'transportadora',
-      'venta',
-      'ganancia_calc',
-      'flete',
-      'cartera',
-    ];
-    const field = allowedFields.includes(sortField) ? `pedido.${sortField}` : 'pedido.id';
+    const allowed = PEDIDO_SORTABLE_FIELDS as readonly string[];
+    const field = allowed.includes(sortField) ? `pedido.${sortField}` : 'pedido.id';
     qb.orderBy(field, sortOrder);
     if (field !== 'pedido.id') {
       qb.addOrderBy('pedido.id', 'DESC');

@@ -126,6 +126,8 @@ describe('ReportesLogisticaService', () => {
         ubicacion: 'CUNDINAMARCA',
         transportadora: 'ENVIA',
         valorPct: 75,
+        numerador: 15,
+        denominador: 20,
       });
 
       let call2 = 0;
@@ -138,6 +140,8 @@ describe('ReportesLogisticaService', () => {
         top: 15,
       });
       expect(dev.puntos[0].valorPct).toBe(20);
+      expect(dev.puntos[0].numerador).toBe(4);
+      expect(dev.puntos[0].denominador).toBe(20);
     });
   });
 });

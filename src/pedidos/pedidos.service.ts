@@ -16,6 +16,8 @@ export type PedidoListQuery = {
   estado_unificado?: string;
   transportadora?: string;
   ciudad?: string;
+  /** PK interna (CAST a texto, búsqueda parcial). */
+  id?: string;
   id_dropi?: string;
   cliente?: string;
   telefono?: string;
@@ -171,6 +173,7 @@ export class PedidosService {
 
     this.applyIlike(qb, query?.estado_unificado, 'pedido.estado_unificado', 'estado');
     this.applyIlike(qb, query?.transportadora, 'pedido.transportadora', 'transportadora');
+    this.applyNumericTextSearch(qb, query?.id, 'pedido.id', 'pedido_id_txt');
     this.applyIlike(qb, query?.id_dropi, 'pedido.id_dropi', 'id_dropi');
     this.applyIlike(qb, query?.ciudad, 'pedido.ciudad', 'ciudad');
     this.applyIlike(qb, query?.cliente, 'pedido.cliente', 'cliente');

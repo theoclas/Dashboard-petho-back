@@ -18,7 +18,22 @@ import type {
 
 /** Filtros y orden compartidos entre GET /cpa y exportación Excel. */
 export type CpaListQuery = {
+  id?: string;
+  semana?: string;
   producto?: string;
+  cuenta_publicitaria?: string;
+  gasto_publicidad?: string;
+  conversaciones?: string;
+  total_facturado?: string;
+  ganancia_promedio?: string;
+  ventas?: string;
+  ticket_promedio_producto?: string;
+  cpa?: string;
+  conversion_rate?: string;
+  costo_publicitario?: string;
+  rentabilidad?: string;
+  utilidad_aproximada?: string;
+  fecha_contains?: string;
   sortField?: string;
   sortOrder?: 'ASC' | 'DESC';
   startDate?: string;
@@ -405,19 +420,66 @@ export class CpaService {
     'utilidad_aproximada',
   ] as const;
 
-  private createCpaListQueryBuilder(query?: CpaListQuery): SelectQueryBuilder<Cpa> {
-    const qb = this.cpaRepository.createQueryBuilder('cpa');
-    if (query?.producto?.trim()) {
-      qb.andWhere('cpa.producto ILIKE :prod', {
-        prod: `%${query.producto.trim()}%`,
-      });
-    }
+  private applyCpaIlike(
+    qb: SelectQueryBuilder<Cpa>,
+    value: string | undefined,
+    column: string,
+    param: string,
+  ): void {
+    const t = value?.trim();
+    if (!t) return;
+    qb.andWhere(`${column} ILIKE :${param}`, { [param]: `%${t}%` });
+  }
+
+  private applyCpaNumericTextSearch(
+    qb: SelectQueryBuilder<Cpa>,
+    value: string | undefined,
+    column: string,
+    param: string,
+  ): void {
+    const t = value?.trim();
+    if (!t) return;
+    qb.andWhere(`CAST(${column} AS TEXT) ILIKE :${param}`, { [param]: `%${t}%` });
+  }
+
+  private applyCpaFilters(qb: SelectQueryBuilder<Cpa>, query?: CpaListQuery): void {
     if (query?.startDate && query?.endDate) {
       qb.andWhere(sqlCastDateBetween('cpa.fecha'), {
         startDate: extractCalendarDateParam(query.startDate),
         endDate: extractCalendarDateParam(query.endDate),
       });
     }
+    this.applyCpaNumericTextSearch(qb, query?.id, 'cpa.id', 'cpa_id_txt');
+    this.applyCpaIlike(qb, query?.semana, 'cpa.semana', 'cpa_sem');
+    this.applyCpaIlike(qb, query?.producto, 'cpa.producto', 'cpa_prod');
+    this.applyCpaIlike(qb, query?.cuenta_publicitaria, 'cpa.cuenta_publicitaria', 'cpa_cta');
+    this.applyCpaNumericTextSearch(qb, query?.gasto_publicidad, 'cpa.gasto_publicidad', 'cpa_gp');
+    this.applyCpaNumericTextSearch(qb, query?.conversaciones, 'cpa.conversaciones', 'cpa_conv');
+    this.applyCpaNumericTextSearch(qb, query?.total_facturado, 'cpa.total_facturado', 'cpa_tf');
+    this.applyCpaNumericTextSearch(qb, query?.ganancia_promedio, 'cpa.ganancia_promedio', 'cpa_gan');
+    this.applyCpaNumericTextSearch(qb, query?.ventas, 'cpa.ventas', 'cpa_v');
+    this.applyCpaNumericTextSearch(
+      qb,
+      query?.ticket_promedio_producto,
+      'cpa.ticket_promedio_producto',
+      'cpa_tp',
+    );
+    this.applyCpaNumericTextSearch(qb, query?.cpa, 'cpa.cpa', 'cpa_cpa');
+    this.applyCpaNumericTextSearch(qb, query?.conversion_rate, 'cpa.conversion_rate', 'cpa_cr');
+    this.applyCpaNumericTextSearch(qb, query?.costo_publicitario, 'cpa.costo_publicitario', 'cpa_cpub');
+    this.applyCpaNumericTextSearch(qb, query?.rentabilidad, 'cpa.rentabilidad', 'cpa_rent');
+    this.applyCpaNumericTextSearch(qb, query?.utilidad_aproximada, 'cpa.utilidad_aproximada', 'cpa_util');
+    const fc = query?.fecha_contains?.trim();
+    if (fc) {
+      qb.andWhere(`CAST(cpa.fecha AS TEXT) ILIKE :cpa_fecha_contains`, {
+        cpa_fecha_contains: `%${fc}%`,
+      });
+    }
+  }
+
+  private createCpaListQueryBuilder(query?: CpaListQuery): SelectQueryBuilder<Cpa> {
+    const qb = this.cpaRepository.createQueryBuilder('cpa');
+    this.applyCpaFilters(qb, query);
     const sortField = query?.sortField || 'fecha';
     const sortOrder = query?.sortOrder === 'ASC' ? 'ASC' : 'DESC';
     const sortableFields = this.cpaSortableFields;

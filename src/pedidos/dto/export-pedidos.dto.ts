@@ -16,6 +16,10 @@ export class ExportPedidosDto {
 
   @IsOptional()
   @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
   id_dropi?: string;
 
   @IsOptional()

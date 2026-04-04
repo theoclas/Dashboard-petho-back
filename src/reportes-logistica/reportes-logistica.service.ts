@@ -25,6 +25,10 @@ export interface ComparativaGeograficaPunto {
   ubicacion: string;
   transportadora: string;
   valorPct: number;
+  /** Parte del %: entregados si metrica=efectividad, devoluciones si metrica=devolucion. */
+  numerador: number;
+  /** Total de pedidos en la celda (misma base que valorPct). */
+  denominador: number;
 }
 
 export interface ComparativaGeograficaResponse {
@@ -215,10 +219,13 @@ export class ReportesLogisticaService {
           ? (ent / env) * 100
           : (dev / env) * 100;
       const valorPct = Math.round(raw * 10) / 10;
+      const numerador = params.metrica === 'efectividad' ? ent : dev;
       puntos.push({
         ubicacion: r.loc,
         transportadora: (r.empresa || '').toUpperCase(),
         valorPct,
+        numerador,
+        denominador: env,
       });
     }
 

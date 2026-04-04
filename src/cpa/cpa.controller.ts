@@ -60,13 +60,49 @@ export class CpaController {
 
   @Get()
   findAll(
+    @Query('id') id?: string,
+    @Query('semana') semana?: string,
     @Query('producto') producto?: string,
+    @Query('cuenta_publicitaria') cuentaPublicitaria?: string,
+    @Query('gasto_publicidad') gastoPublicidad?: string,
+    @Query('conversaciones') conversaciones?: string,
+    @Query('total_facturado') totalFacturado?: string,
+    @Query('ganancia_promedio') gananciaPromedio?: string,
+    @Query('ventas') ventas?: string,
+    @Query('ticket_promedio_producto') ticketPromedioProducto?: string,
+    @Query('cpa') cpa?: string,
+    @Query('conversion_rate') conversionRate?: string,
+    @Query('costo_publicitario') costoPublicitario?: string,
+    @Query('rentabilidad') rentabilidad?: string,
+    @Query('utilidad_aproximada') utilidadAproximada?: string,
+    @Query('fecha_contains') fechaContains?: string,
     @Query('sortField') sortField?: string,
     @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.cpaService.findAll({ producto, sortField, sortOrder, startDate, endDate });
+    return this.cpaService.findAll({
+      id,
+      semana,
+      producto,
+      cuenta_publicitaria: cuentaPublicitaria,
+      gasto_publicidad: gastoPublicidad,
+      conversaciones,
+      total_facturado: totalFacturado,
+      ganancia_promedio: gananciaPromedio,
+      ventas,
+      ticket_promedio_producto: ticketPromedioProducto,
+      cpa,
+      conversion_rate: conversionRate,
+      costo_publicitario: costoPublicitario,
+      rentabilidad,
+      utilidad_aproximada: utilidadAproximada,
+      fecha_contains: fechaContains,
+      sortField,
+      sortOrder,
+      startDate,
+      endDate,
+    });
   }
 
   /**
@@ -79,7 +115,22 @@ export class CpaController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.cpaService.exportCpaExcel({
+      id: body.id,
+      semana: body.semana,
       producto: body.producto,
+      cuenta_publicitaria: body.cuenta_publicitaria,
+      gasto_publicidad: body.gasto_publicidad,
+      conversaciones: body.conversaciones,
+      total_facturado: body.total_facturado,
+      ganancia_promedio: body.ganancia_promedio,
+      ventas: body.ventas,
+      ticket_promedio_producto: body.ticket_promedio_producto,
+      cpa: body.cpa,
+      conversion_rate: body.conversion_rate,
+      costo_publicitario: body.costo_publicitario,
+      rentabilidad: body.rentabilidad,
+      utilidad_aproximada: body.utilidad_aproximada,
+      fecha_contains: body.fecha_contains,
       sortField: body.sortField,
       sortOrder: body.sortOrder,
       startDate: body.startDate,

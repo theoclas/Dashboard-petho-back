@@ -42,7 +42,7 @@ export class PorProductoQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
+  @Max(800)
   limit?: number = 20;
 
   @IsOptional()

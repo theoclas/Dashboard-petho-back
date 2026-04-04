@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { CreateCpaDto } from './dto/create-cpa.dto';
 import { UpdateCpaDto } from './dto/update-cpa.dto';
 import { Cpa } from './entities/cpa.entity';
+import { applyCpaDerivedFields } from './cpa-derived-fields';
 import {
   extractCalendarDateParam,
   sqlCastDateBetween,
@@ -262,6 +263,7 @@ export class CpaService {
 
   create(createCpaDto: CreateCpaDto) {
     const cpa = this.cpaRepository.create(createCpaDto);
+    applyCpaDerivedFields(cpa);
     return this.cpaRepository.save(cpa);
   }
 
@@ -287,6 +289,7 @@ export class CpaService {
       await this.cpaRepository.delete({ id: In(rows.slice(1).map((x) => x.id)) });
     }
     Object.assign(primary, data);
+    applyCpaDerivedFields(primary);
     return this.cpaRepository.save(primary);
   }
 
@@ -365,9 +368,12 @@ export class CpaService {
         const hit = primaryByKey.get(k);
         if (hit) {
           Object.assign(hit, r);
+          applyCpaDerivedFields(hit);
           toSave.push(hit);
         } else {
-          toSave.push(this.cpaRepository.create(r as CreateCpaDto));
+          const created = this.cpaRepository.create(r as CreateCpaDto);
+          applyCpaDerivedFields(created);
+          toSave.push(created);
         }
       }
 
@@ -502,6 +508,7 @@ export class CpaService {
   async update(id: number, updateCpaDto: UpdateCpaDto) {
     const cpa = await this.findOne(id);
     Object.assign(cpa, updateCpaDto);
+    applyCpaDerivedFields(cpa);
     return this.cpaRepository.save(cpa);
   }
 

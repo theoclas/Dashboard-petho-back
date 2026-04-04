@@ -14,6 +14,7 @@ import { MapeoEstadosService } from '../mapeo-estados/mapeo-estados.service';
 import { NotasService } from '../notas/notas.service';
 import { ProductosDetalleService } from '../productos-detalle/productos-detalle.service';
 import { CpaService } from '../cpa/cpa.service';
+import { applyCpaDerivedFields } from '../cpa/cpa-derived-fields';
 import { Cpa } from '../cpa/entities/cpa.entity';
 import { Pedido } from '../pedidos/entities/pedido.entity';
 import { ProductoDetalle } from '../productos-detalle/entities/producto-detalle.entity';
@@ -555,6 +556,7 @@ export class ImportService {
           ),
         };
 
+        applyCpaDerivedFields(cpaData);
         toImport.push(cpaData);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

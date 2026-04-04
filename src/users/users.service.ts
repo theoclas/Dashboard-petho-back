@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, UserRole } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { AdminCreateUserDto } from './dto/admin-create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
@@ -62,6 +63,31 @@ export class UsersService implements OnModuleInit {
       // Todos nacen inactivos y como LECTOR por defecto por seguridad
       is_active: false,
       role: UserRole.LECTOR,
+    });
+
+    const saved = await this.usersRepository.save(user);
+    const { password, ...result } = saved;
+    return result;
+  }
+
+  async createByAdmin(dto: AdminCreateUserDto): Promise<Partial<User>> {
+    const existingEmail = await this.usersRepository.findOne({ where: { email: dto.email } });
+    if (existingEmail) {
+      throw new ConflictException('El correo ya está registrado');
+    }
+
+    const existingUsername = await this.usersRepository.findOne({ where: { username: dto.username } });
+    if (existingUsername) {
+      throw new ConflictException('El usuario ya está registrado');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const user = this.usersRepository.create({
+      email: dto.email,
+      username: dto.username,
+      password: hashedPassword,
+      role: dto.role ?? UserRole.LECTOR,
+      is_active: dto.is_active ?? false,
     });
 
     const saved = await this.usersRepository.save(user);

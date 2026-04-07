@@ -42,11 +42,19 @@ export type CpaListQuery = {
 
 const EXPORT_MAX_ROWS = 50_000;
 
+/** Celda Fecha en export: día calendario (evita correr un día con toISOString en medianoche UTC). */
 function fmtDateCell(d: Date | string | null | undefined): string {
   if (d == null) return '';
+  if (typeof d === 'string') {
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
   const x = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(x.getTime())) return '';
-  return x.toISOString().slice(0, 10);
+  const y = x.getFullYear();
+  const mo = String(x.getMonth() + 1).padStart(2, '0');
+  const day = String(x.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
 }
 
 /** Export CPA: null/undefined → celda vacía en Excel (no 0). */

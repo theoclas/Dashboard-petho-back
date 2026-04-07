@@ -21,7 +21,8 @@ import { UserRole } from '../users/entities/user.entity';
 export class ImportController {
   constructor(private readonly importService: ImportService) {}
 
-  @Post('pedidos')
+  /** Rutas con y sin `/` final: proxies que redirigen con 307 rompen CORS en subidas multipart. */
+  @Post(['pedidos', 'pedidos/'])
   @UseInterceptors(FileInterceptor('file'))
   async importPedidos(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
@@ -30,7 +31,7 @@ export class ImportController {
     return this.importService.importPedidos(file.buffer);
   }
 
-  @Post('productos')
+  @Post(['productos', 'productos/'])
   @UseInterceptors(FileInterceptor('file'))
   async importProductos(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
@@ -39,7 +40,7 @@ export class ImportController {
     return this.importService.importProductos(file.buffer);
   }
 
-  @Post('cartera')
+  @Post(['cartera', 'cartera/'])
   @UseInterceptors(FileInterceptor('file'))
   async importCartera(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
@@ -48,7 +49,7 @@ export class ImportController {
     return this.importService.importCartera(file.buffer);
   }
 
-  @Post('cpa')
+  @Post(['cpa', 'cpa/'])
   @UseInterceptors(FileInterceptor('file'))
   async importCpa(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
@@ -57,7 +58,7 @@ export class ImportController {
     return this.importService.importCpa(file.buffer);
   }
 
-  @Post('mapeo-estados')
+  @Post(['mapeo-estados', 'mapeo-estados/'])
   @UseInterceptors(FileInterceptor('file'))
   async importMapeoEstados(@UploadedFile() file: Express.Multer.File) {
     if (!file) {

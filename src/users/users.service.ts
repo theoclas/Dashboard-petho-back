@@ -1,4 +1,10 @@
-import { Injectable, ConflictException, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -19,7 +25,9 @@ export class UsersService implements OnModuleInit {
   }
 
   async seedAdmin() {
-    const adminCount = await this.usersRepository.count({ where: { role: UserRole.ADMIN } });
+    const adminCount = await this.usersRepository.count({
+      where: { role: UserRole.ADMIN, is_deleted: false },
+    });
   
     if (adminCount === 0) {
       const email = process.env.ADMIN_EMAIL;
@@ -46,12 +54,16 @@ export class UsersService implements OnModuleInit {
   
 
   async create(createUserDto: CreateUserDto): Promise<Partial<User>> {
-    const existingEmail = await this.usersRepository.findOne({ where: { email: createUserDto.email } });
+    const existingEmail = await this.usersRepository.findOne({
+      where: { email: createUserDto.email, is_deleted: false },
+    });
     if (existingEmail) {
       throw new ConflictException('El correo ya está registrado');
     }
 
-    const existingUsername = await this.usersRepository.findOne({ where: { username: createUserDto.username } });
+    const existingUsername = await this.usersRepository.findOne({
+      where: { username: createUserDto.username, is_deleted: false },
+    });
     if (existingUsername) {
       throw new ConflictException('El usuario ya está registrado');
     }
@@ -71,12 +83,16 @@ export class UsersService implements OnModuleInit {
   }
 
   async createByAdmin(dto: AdminCreateUserDto): Promise<Partial<User>> {
-    const existingEmail = await this.usersRepository.findOne({ where: { email: dto.email } });
+    const existingEmail = await this.usersRepository.findOne({
+      where: { email: dto.email, is_deleted: false },
+    });
     if (existingEmail) {
       throw new ConflictException('El correo ya está registrado');
     }
 
-    const existingUsername = await this.usersRepository.findOne({ where: { username: dto.username } });
+    const existingUsername = await this.usersRepository.findOne({
+      where: { username: dto.username, is_deleted: false },
+    });
     if (existingUsername) {
       throw new ConflictException('El usuario ya está registrado');
     }
@@ -97,6 +113,7 @@ export class UsersService implements OnModuleInit {
 
   async findAll(): Promise<Partial<User>[]> {
     const users = await this.usersRepository.find({
+      where: { is_deleted: false },
       order: { id: 'ASC' },
     });
     return users.map(user => {
@@ -105,8 +122,13 @@ export class UsersService implements OnModuleInit {
     });
   }
 
+  /** Usuario activo en sesión (no eliminado). */
+  async findForSession(id: number): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { id, is_deleted: false } });
+  }
+
   async findOne(id: number): Promise<User> {
-    const user = await this.usersRepository.findOne({ where: { id } });
+    const user = await this.usersRepository.findOne({ where: { id, is_deleted: false } });
     if (!user) {
       throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     }
@@ -114,11 +136,11 @@ export class UsersService implements OnModuleInit {
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { email } });
+    return this.usersRepository.findOne({ where: { email, is_deleted: false } });
   }
 
   async findByUsername(username: string): Promise<User | null> {
-    return this.usersRepository.findOne({ where: { username } });
+    return this.usersRepository.findOne({ where: { username, is_deleted: false } });
   }
 
   async update(id: number, updateUserDto: UpdateUserDto): Promise<Partial<User>> {
@@ -127,5 +149,27 @@ export class UsersService implements OnModuleInit {
     const updated = await this.usersRepository.save(user);
     const { password, ...result } = updated;
     return result;
+  }
+
+  async remove(id: number, actorUserId: number): Promise<{ ok: true }> {
+    if (id === actorUserId) {
+      throw new BadRequestException('No puedes eliminar tu propio usuario');
+    }
+
+    const user = await this.findOne(id);
+
+    if (user.role === UserRole.ADMIN) {
+      const adminCount = await this.usersRepository.count({
+        where: { role: UserRole.ADMIN, is_deleted: false },
+      });
+      if (adminCount <= 1) {
+        throw new BadRequestException('No se puede eliminar el último administrador');
+      }
+    }
+
+    user.is_deleted = true;
+    user.is_active = false;
+    await this.usersRepository.save(user);
+    return { ok: true };
   }
 }

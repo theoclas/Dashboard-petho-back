@@ -133,81 +133,43 @@ export class ReportesLogisticaService {
     }
   }
 
-  async getComparativaGeografica(params: {
-    dimension: 'departamento' | 'ciudad';
-    metrica: 'efectividad' | 'devolucion';
-    top: number;
-    desde?: string;
-    hasta?: string;
-  }): Promise<ComparativaGeograficaResponse> {
+  async getCiudadesParaComparativa(params: { desde?: string; hasta?: string }): Promise<string[]> {
     try {
-    const geoPath =
-      params.dimension === 'ciudad' ? 'pedido.ciudad' : 'pedido.departamento';
-    const bucket = pedidoBucketCaseSql('pedido');
+      const qb = this.pedidoRepository
+        .createQueryBuilder('pedido')
+        .select('TRIM(pedido.ciudad)', 'c')
+        .addSelect('COUNT(*)::int', 'vol')
+        .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+        .andWhere("pedido.ciudad IS NOT NULL AND TRIM(pedido.ciudad) <> ''");
 
-    const qbTop = this.pedidoRepository
-      .createQueryBuilder('pedido')
-      .select(`TRIM(${geoPath})`, 'loc')
-      .addSelect('COUNT(*)::int', 'vol')
-      .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
-      .andWhere(`${geoPath} IS NOT NULL AND TRIM(${geoPath}) <> ''`);
+      if (params.desde && params.hasta) {
+        qb.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
+          desde: extractCalendarDateParam(params.desde),
+          hasta: extractCalendarDateParam(params.hasta),
+        });
+      }
 
-    if (params.desde && params.hasta) {
-      qbTop.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
-        desde: extractCalendarDateParam(params.desde),
-        hasta: extractCalendarDateParam(params.hasta),
-      });
+      qb.groupBy('TRIM(pedido.ciudad)').orderBy('vol', 'DESC');
+
+      const rows = await qb.getRawMany<{ c: string; vol: string }>();
+      return rows.map((r) => r.c).filter(Boolean);
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.error(`getCiudadesParaComparativa: ${err.message}`, err.stack);
+      throw e;
     }
+  }
 
-    qbTop
-      .groupBy(`TRIM(${geoPath})`)
-      .orderBy('vol', 'DESC')
-      .limit(params.top);
-
-    const topRows = await qbTop.getRawMany<{ loc: string; vol: string }>();
-    const ubicaciones = topRows.map((r) => r.loc).filter(Boolean);
-    if (ubicaciones.length === 0) {
-      return {
-        dimension: params.dimension,
-        metrica: params.metrica,
-        ubicaciones: [],
-        puntos: [],
-      };
-    }
-
-    const qbDet = this.pedidoRepository
-      .createQueryBuilder('pedido')
-      .select(`TRIM(${geoPath})`, 'loc')
-      .addSelect('TRIM(pedido.transportadora)', 'empresa')
-      .addSelect('COUNT(*)::int', 'enviados')
-      .addSelect(
-        `SUM(CASE WHEN ${bucket} = 'entregado' THEN 1 ELSE 0 END)::int`,
-        'entregados',
-      )
-      .addSelect(
-        `SUM(CASE WHEN ${bucket} = 'devolucion' THEN 1 ELSE 0 END)::int`,
-        'devoluciones',
-      )
-      .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
-      .andWhere(`TRIM(${geoPath}) IN (:...locs)`, { locs: ubicaciones });
-
-    if (params.desde && params.hasta) {
-      qbDet.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
-        desde: extractCalendarDateParam(params.desde),
-        hasta: extractCalendarDateParam(params.hasta),
-      });
-    }
-
-    qbDet.groupBy(`TRIM(${geoPath})`).addGroupBy('TRIM(pedido.transportadora)');
-
-    const det = await qbDet.getRawMany<{
+  private buildPuntosComparativa(
+    det: Array<{
       loc: string;
       empresa: string;
       enviados: string;
       entregados: string;
       devoluciones: string;
-    }>();
-
+    }>,
+    metrica: 'efectividad' | 'devolucion',
+  ): ComparativaGeograficaPunto[] {
     const puntos: ComparativaGeograficaPunto[] = [];
     for (const r of det) {
       const env = Number(r.enviados) || 0;
@@ -215,11 +177,9 @@ export class ReportesLogisticaService {
       const ent = Number(r.entregados) || 0;
       const dev = Number(r.devoluciones) || 0;
       const raw =
-        params.metrica === 'efectividad'
-          ? (ent / env) * 100
-          : (dev / env) * 100;
+        metrica === 'efectividad' ? (ent / env) * 100 : (dev / env) * 100;
       const valorPct = Math.round(raw * 10) / 10;
-      const numerador = params.metrica === 'efectividad' ? ent : dev;
+      const numerador = metrica === 'efectividad' ? ent : dev;
       puntos.push({
         ubicacion: r.loc,
         transportadora: (r.empresa || '').toUpperCase(),
@@ -228,13 +188,152 @@ export class ReportesLogisticaService {
         denominador: env,
       });
     }
+    return puntos;
+  }
 
-    return {
-      dimension: params.dimension,
-      metrica: params.metrica,
-      ubicaciones,
-      puntos,
-    };
+  async getComparativaGeografica(params: {
+    dimension: 'departamento' | 'ciudad';
+    metrica: 'efectividad' | 'devolucion';
+    top: number;
+    desde?: string;
+    hasta?: string;
+    ciudad?: string;
+  }): Promise<ComparativaGeograficaResponse> {
+    try {
+      const geoPath =
+        params.dimension === 'ciudad' ? 'pedido.ciudad' : 'pedido.departamento';
+      const bucket = pedidoBucketCaseSql('pedido');
+
+      const ciudadFiltro =
+        params.dimension === 'ciudad' && params.ciudad?.trim()
+          ? params.ciudad.trim()
+          : null;
+
+      if (ciudadFiltro) {
+        const qbDet = this.pedidoRepository
+          .createQueryBuilder('pedido')
+          .select(`TRIM(${geoPath})`, 'loc')
+          .addSelect('TRIM(pedido.transportadora)', 'empresa')
+          .addSelect('COUNT(*)::int', 'enviados')
+          .addSelect(
+            `SUM(CASE WHEN ${bucket} = 'entregado' THEN 1 ELSE 0 END)::int`,
+            'entregados',
+          )
+          .addSelect(
+            `SUM(CASE WHEN ${bucket} = 'devolucion' THEN 1 ELSE 0 END)::int`,
+            'devoluciones',
+          )
+          .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+          .andWhere(`${geoPath} IS NOT NULL AND TRIM(${geoPath}) <> ''`)
+          .andWhere('LOWER(TRIM(pedido.ciudad)) = LOWER(TRIM(:cf))', { cf: ciudadFiltro });
+
+        if (params.desde && params.hasta) {
+          qbDet.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
+            desde: extractCalendarDateParam(params.desde),
+            hasta: extractCalendarDateParam(params.hasta),
+          });
+        }
+
+        qbDet.groupBy(`TRIM(${geoPath})`).addGroupBy('TRIM(pedido.transportadora)');
+
+        const det = await qbDet.getRawMany<{
+          loc: string;
+          empresa: string;
+          enviados: string;
+          entregados: string;
+          devoluciones: string;
+        }>();
+
+        const ubicaciones = [...new Set(det.map((r) => r.loc).filter(Boolean))];
+        if (ubicaciones.length === 0) {
+          return {
+            dimension: params.dimension,
+            metrica: params.metrica,
+            ubicaciones: [],
+            puntos: [],
+          };
+        }
+
+        const puntos = this.buildPuntosComparativa(det, params.metrica);
+        return {
+          dimension: params.dimension,
+          metrica: params.metrica,
+          ubicaciones,
+          puntos,
+        };
+      }
+
+      const qbTop = this.pedidoRepository
+        .createQueryBuilder('pedido')
+        .select(`TRIM(${geoPath})`, 'loc')
+        .addSelect('COUNT(*)::int', 'vol')
+        .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+        .andWhere(`${geoPath} IS NOT NULL AND TRIM(${geoPath}) <> ''`);
+
+      if (params.desde && params.hasta) {
+        qbTop.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
+          desde: extractCalendarDateParam(params.desde),
+          hasta: extractCalendarDateParam(params.hasta),
+        });
+      }
+
+      qbTop
+        .groupBy(`TRIM(${geoPath})`)
+        .orderBy('vol', 'DESC')
+        .limit(params.top);
+
+      const topRows = await qbTop.getRawMany<{ loc: string; vol: string }>();
+      const ubicaciones = topRows.map((r) => r.loc).filter(Boolean);
+      if (ubicaciones.length === 0) {
+        return {
+          dimension: params.dimension,
+          metrica: params.metrica,
+          ubicaciones: [],
+          puntos: [],
+        };
+      }
+
+      const qbDet = this.pedidoRepository
+        .createQueryBuilder('pedido')
+        .select(`TRIM(${geoPath})`, 'loc')
+        .addSelect('TRIM(pedido.transportadora)', 'empresa')
+        .addSelect('COUNT(*)::int', 'enviados')
+        .addSelect(
+          `SUM(CASE WHEN ${bucket} = 'entregado' THEN 1 ELSE 0 END)::int`,
+          'entregados',
+        )
+        .addSelect(
+          `SUM(CASE WHEN ${bucket} = 'devolucion' THEN 1 ELSE 0 END)::int`,
+          'devoluciones',
+        )
+        .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+        .andWhere(`TRIM(${geoPath}) IN (:...locs)`, { locs: ubicaciones });
+
+      if (params.desde && params.hasta) {
+        qbDet.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
+          desde: extractCalendarDateParam(params.desde),
+          hasta: extractCalendarDateParam(params.hasta),
+        });
+      }
+
+      qbDet.groupBy(`TRIM(${geoPath})`).addGroupBy('TRIM(pedido.transportadora)');
+
+      const det = await qbDet.getRawMany<{
+        loc: string;
+        empresa: string;
+        enviados: string;
+        entregados: string;
+        devoluciones: string;
+      }>();
+
+      const puntos = this.buildPuntosComparativa(det, params.metrica);
+
+      return {
+        dimension: params.dimension,
+        metrica: params.metrica,
+        ubicaciones,
+        puntos,
+      };
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       this.logger.error(`getComparativaGeografica: ${err.message}`, err.stack);

@@ -18,6 +18,14 @@ export class ReportesLogisticaController {
     });
   }
 
+  @Get('ciudades-comparativa')
+  getCiudadesComparativa(@Query() query: EfectividadQueryDto) {
+    return this.reportesLogisticaService.getCiudadesParaComparativa({
+      desde: query.desde,
+      hasta: query.hasta,
+    });
+  }
+
   @Get('comparativa-geografica')
   getComparativaGeografica(@Query() query: ComparativaQueryDto) {
     return this.reportesLogisticaService.getComparativaGeografica({
@@ -26,6 +34,7 @@ export class ReportesLogisticaController {
       top: query.top ?? 15,
       desde: query.desde,
       hasta: query.hasta,
+      ciudad: query.ciudad,
     });
   }
 }

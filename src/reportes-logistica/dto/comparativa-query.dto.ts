@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class ComparativaQueryDto {
   @IsOptional()
@@ -24,4 +24,10 @@ export class ComparativaQueryDto {
   @IsOptional()
   @IsString()
   hasta?: string;
+
+  /** Solo con dimension=ciudad: una ciudad concreta (mismo rango de fechas). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  ciudad?: string;
 }

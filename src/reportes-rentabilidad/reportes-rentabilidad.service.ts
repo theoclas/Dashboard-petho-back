@@ -47,6 +47,24 @@ export class ReportesRentabilidadService {
     sortBy: RentabilidadSortBy;
     order: 'asc' | 'desc';
     search?: string;
+    minEntr?: number;
+    maxEntr?: number;
+    minTran?: number;
+    maxTran?: number;
+    minDev?: number;
+    maxDev?: number;
+    minPctEfectividad?: number;
+    maxPctEfectividad?: number;
+    minPctTransito?: number;
+    maxPctTransito?: number;
+    minPctDevolucion?: number;
+    maxPctDevolucion?: number;
+    minVentas?: number;
+    maxVentas?: number;
+    minPauta?: number;
+    maxPauta?: number;
+    minUtilidad?: number;
+    maxUtilidad?: number;
   }): Promise<{ data: RentabilidadProductoRow[]; total: number; page: number; limit: number }> {
     try {
     const bucketExpr = pedidoBucketCaseSql('p');
@@ -76,22 +94,48 @@ export class ReportesRentabilidadService {
     }
 
     const ilikePh = push(searchPattern);
+
+    const metricConds: string[] = [];
+    const addRange = (col: string, min?: number, max?: number) => {
+      if (min != null && typeof min === 'number' && !Number.isNaN(min)) {
+        metricConds.push(`fi.${col} >= ${push(min)}`);
+      }
+      if (max != null && typeof max === 'number' && !Number.isNaN(max)) {
+        metricConds.push(`fi.${col} <= ${push(max)}`);
+      }
+    };
+    addRange('entr', params.minEntr, params.maxEntr);
+    addRange('tran', params.minTran, params.maxTran);
+    addRange('dev', params.minDev, params.maxDev);
+    addRange('pct_efectividad', params.minPctEfectividad, params.maxPctEfectividad);
+    addRange('pct_transito', params.minPctTransito, params.maxPctTransito);
+    addRange('pct_devolucion', params.minPctDevolucion, params.maxPctDevolucion);
+    addRange('ventas', params.minVentas, params.maxVentas);
+    addRange('pauta', params.minPauta, params.maxPauta);
+    addRange('utilidad', params.minUtilidad, params.maxUtilidad);
+
+    const finalWhereExtra =
+      metricConds.length > 0 ? ` AND ${metricConds.join(' AND ')}` : '';
+
     const limitPh = push(params.limit);
     const offsetPh = push(offset);
 
     /**
      * Universo de filas = productos que aparecen en CPA (mismo rango de fechas que pedidos cuando aplica).
      * Nombre mostrado = texto CPA (MIN estable por pk). Pauta = suma gasto CPA.
-     * Métricas logística/ventas/utilidad = agregado desde pedidos filas cuyo nombre Dropi coincide con CPA:
-     * igualdad LOWER(TRIM) o el pk CPA está contenido en el nombre pedido (POSITION); si varios CPA encajan,
-     * gana el pk más largo para reducir dobles conteos.
+     * Métricas logística = agregado desde pedidos (producto Dropi que coincide con CPA por igualdad o contenido).
+     * Ventas y utilidad: si hay ventas agregadas desde pedidos (>0), se usan; si no, fallback a lo importado en CPA
+     * (total_facturado y utilidad_aproximada) para no mostrar 0 cuando el Excel CPA sí trae facturación pero los
+     * nombres de línea en pedidos no enlazan con el producto CPA.
      */
     const cte = `
       cpa_products AS (
         SELECT
           LOWER(TRIM(cpa.producto)) AS pk,
           MIN(TRIM(cpa.producto)) AS nombre_display,
-          SUM(COALESCE(cpa.gasto_publicidad, 0))::numeric AS pauta_total
+          SUM(COALESCE(cpa.gasto_publicidad, 0))::numeric AS pauta_total,
+          SUM(COALESCE(cpa.total_facturado, 0))::numeric AS cpa_facturado_total,
+          SUM(COALESCE(cpa.utilidad_aproximada, 0))::numeric AS cpa_utilidad_aprox_total
         FROM cpas cpa
         WHERE cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''
           ${dateCondCpa}
@@ -154,16 +198,26 @@ export class ReportesRentabilidadService {
         WHERE cpa_pk IS NOT NULL
         GROUP BY cpa_pk
       ),
-      final AS (
+      final_inner AS (
         SELECT
           cp.nombre_display AS producto,
           COALESCE(ab.entregados, 0)::int AS entr,
           COALESCE(ab.transito, 0)::int AS tran,
           COALESCE(ab.devoluciones, 0)::int AS dev,
           COALESCE(ab.enviados, 0)::int AS enviados,
-          COALESCE(ab.ventas, 0)::numeric AS ventas,
+          (
+            CASE
+              WHEN COALESCE(ab.ventas, 0) > 0 THEN ab.ventas
+              ELSE COALESCE(cp.cpa_facturado_total, 0)
+            END
+          )::numeric AS ventas,
           cp.pauta_total::numeric AS pauta,
-          COALESCE(ab.utilidad, 0)::numeric AS utilidad,
+          (
+            CASE
+              WHEN COALESCE(ab.ventas, 0) > 0 THEN COALESCE(ab.utilidad, 0)
+              ELSE COALESCE(cp.cpa_utilidad_aprox_total, 0)
+            END
+          )::numeric AS utilidad,
           CASE WHEN COALESCE(ab.enviados, 0) > 0
             THEN ROUND((COALESCE(ab.entregados, 0)::numeric / ab.enviados) * 1000) / 10
             ELSE 0 END AS pct_efectividad,
@@ -176,6 +230,10 @@ export class ReportesRentabilidadService {
         FROM cpa_products cp
         LEFT JOIN agg_by_cpa ab ON ab.cpa_pk = cp.pk
         WHERE cp.nombre_display ILIKE ${ilikePh}
+      ),
+      final AS (
+        SELECT * FROM final_inner fi
+        WHERE 1=1${finalWhereExtra}
       )
     `;
 

@@ -2,6 +2,8 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ReportesRentabilidadService } from './reportes-rentabilidad.service';
 import { PorProductoQueryDto } from './dto/por-producto-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthUserParam } from '../auth/decorators/auth-user.decorator';
+import type { AuthUser } from '../auth/auth-user.interface';
 
 @Controller('reportes-rentabilidad')
 @UseGuards(JwtAuthGuard)
@@ -11,8 +13,9 @@ export class ReportesRentabilidadController {
   ) {}
 
   @Get('por-producto')
-  getPorProducto(@Query() query: PorProductoQueryDto) {
+  getPorProducto(@AuthUserParam() auth: AuthUser, @Query() query: PorProductoQueryDto) {
     return this.reportesRentabilidadService.getPorProducto({
+      companyId: auth.companyId,
       desde: query.desde,
       hasta: query.hasta,
       page: query.page ?? 1,

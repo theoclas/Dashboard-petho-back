@@ -16,6 +16,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { AuthUserParam } from '../auth/decorators/auth-user.decorator';
+import type { AuthUser } from '../auth/auth-user.interface';
 
 @Controller('mapeo-estados')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -24,30 +26,31 @@ export class MapeoEstadosController {
   constructor(private readonly mapeoEstadosService: MapeoEstadosService) {}
 
   @Post()
-  create(@Body() dto: CreateMapeoEstadoDto) {
-    return this.mapeoEstadosService.create(dto);
+  create(@AuthUserParam() auth: AuthUser, @Body() dto: CreateMapeoEstadoDto) {
+    return this.mapeoEstadosService.create(auth.companyId, dto);
   }
 
   @Get()
-  findAll() {
-    return this.mapeoEstadosService.findAll();
+  findAll(@AuthUserParam() auth: AuthUser) {
+    return this.mapeoEstadosService.findAll(auth.companyId);
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.mapeoEstadosService.findOne(id);
+  findOne(@AuthUserParam() auth: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.mapeoEstadosService.findOne(auth.companyId, id);
   }
 
   @Patch(':id')
   update(
+    @AuthUserParam() auth: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateMapeoEstadoDto,
   ) {
-    return this.mapeoEstadosService.update(id, dto);
+    return this.mapeoEstadosService.update(auth.companyId, id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.mapeoEstadosService.remove(id);
+  remove(@AuthUserParam() auth: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.mapeoEstadosService.remove(auth.companyId, id);
   }
 }

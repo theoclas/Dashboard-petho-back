@@ -22,6 +22,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { AuthUserParam } from '../auth/decorators/auth-user.decorator';
+import type { AuthUser } from '../auth/auth-user.interface';
 
 @Controller('cpa')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -30,36 +32,39 @@ export class CpaController {
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
-  create(@Body() createCpaDto: CreateCpaDto) {
-    return this.cpaService.create(createCpaDto);
+  create(@AuthUserParam() auth: AuthUser, @Body() createCpaDto: CreateCpaDto) {
+    return this.cpaService.create(auth.companyId, createCpaDto);
   }
 
   @Get('stats')
   getDashboardStats(
+    @AuthUserParam() auth: AuthUser,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.cpaService.getDashboardStats(startDate, endDate);
+    return this.cpaService.getDashboardStats(auth.companyId, startDate, endDate);
   }
 
   @Get('distinct-productos')
-  getDistinctProductos() {
-    return this.cpaService.getDistinctProductos();
+  getDistinctProductos(@AuthUserParam() auth: AuthUser) {
+    return this.cpaService.getDistinctProductos(auth.companyId);
   }
 
   /** Resumen jerárquico (mes → semana → día → cuenta → producto) para el rango de fechas. */
   @Get('resumen-diario')
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
   getResumenDiario(
+    @AuthUserParam() auth: AuthUser,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('producto') producto?: string,
   ) {
-    return this.cpaService.getResumenDiario({ startDate, endDate, producto });
+    return this.cpaService.getResumenDiario({ companyId: auth.companyId, startDate, endDate, producto });
   }
 
   @Get()
   findAll(
+    @AuthUserParam() auth: AuthUser,
     @Query('id') id?: string,
     @Query('semana') semana?: string,
     @Query('producto') producto?: string,
@@ -82,6 +87,7 @@ export class CpaController {
     @Query('endDate') endDate?: string,
   ) {
     return this.cpaService.findAll({
+      companyId: auth.companyId,
       id,
       semana,
       producto,
@@ -111,10 +117,12 @@ export class CpaController {
   @Post('export')
   @HttpCode(HttpStatus.OK)
   async exportExcel(
+    @AuthUserParam() auth: AuthUser,
     @Body() body: ExportCpaDto,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.cpaService.exportCpaExcel({
+      companyId: auth.companyId,
       id: body.id,
       semana: body.semana,
       producto: body.producto,
@@ -151,19 +159,19 @@ export class CpaController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.cpaService.findOne(+id);
+  findOne(@AuthUserParam() auth: AuthUser, @Param('id') id: string) {
+    return this.cpaService.findOne(auth.companyId, +id);
   }
 
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
-  update(@Param('id') id: string, @Body() updateCpaDto: UpdateCpaDto) {
-    return this.cpaService.update(+id, updateCpaDto);
+  update(@AuthUserParam() auth: AuthUser, @Param('id') id: string, @Body() updateCpaDto: UpdateCpaDto) {
+    return this.cpaService.update(auth.companyId, +id, updateCpaDto);
   }
 
   @Delete(':id')
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
-  remove(@Param('id') id: string) {
-    return this.cpaService.remove(+id);
+  remove(@AuthUserParam() auth: AuthUser, @Param('id') id: string) {
+    return this.cpaService.remove(auth.companyId, +id);
   }
 }

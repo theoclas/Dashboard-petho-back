@@ -23,6 +23,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { AuthUserParam } from '../auth/decorators/auth-user.decorator';
+import type { AuthUser } from '../auth/auth-user.interface';
 
 @Controller('pedidos')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -31,12 +33,13 @@ export class PedidosController {
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
-  create(@Body() createPedidoDto: CreatePedidoDto) {
-    return this.pedidosService.create(createPedidoDto);
+  create(@AuthUserParam() auth: AuthUser, @Body() createPedidoDto: CreatePedidoDto) {
+    return this.pedidosService.create(auth.companyId, createPedidoDto);
   }
 
   @Get()
   findAll(
+    @AuthUserParam() auth: AuthUser,
     @Query('estado_unificado') estadoUnificado?: string,
     @Query('transportadora') transportadora?: string,
     @Query('ciudad') ciudad?: string,
@@ -70,6 +73,7 @@ export class PedidosController {
     @Query('endDate') endDate?: string,
   ) {
     return this.pedidosService.findAll({
+      companyId: auth.companyId,
       estado_unificado: estadoUnificado,
       transportadora,
       ciudad,
@@ -111,10 +115,12 @@ export class PedidosController {
   @Post('export')
   @HttpCode(HttpStatus.OK)
   async exportExcel(
+    @AuthUserParam() auth: AuthUser,
     @Body() body: ExportPedidosDto,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.pedidosService.exportPedidosExcel({
+      companyId: auth.companyId,
       estado_unificado: body.estado_unificado,
       transportadora: body.transportadora,
       ciudad: body.ciudad,
@@ -164,34 +170,36 @@ export class PedidosController {
 
   @Get('stats')
   getStats(
+    @AuthUserParam() auth: AuthUser,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.pedidosService.getDashboardStats(startDate, endDate);
+    return this.pedidosService.getDashboardStats(auth.companyId, startDate, endDate);
   }
 
   @Get('dropi/:idDropi')
-  findByDropiId(@Param('idDropi') idDropi: string) {
-    return this.pedidosService.findByDropiId(idDropi);
+  findByDropiId(@AuthUserParam() auth: AuthUser, @Param('idDropi') idDropi: string) {
+    return this.pedidosService.findByDropiId(auth.companyId, idDropi);
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.pedidosService.findOne(id);
+  findOne(@AuthUserParam() auth: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.pedidosService.findOne(auth.companyId, id);
   }
 
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
   update(
+    @AuthUserParam() auth: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() updatePedidoDto: UpdatePedidoDto,
   ) {
-    return this.pedidosService.update(id, updatePedidoDto);
+    return this.pedidosService.update(auth.companyId, id, updatePedidoDto);
   }
 
   @Delete(':id')
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.pedidosService.remove(id);
+  remove(@AuthUserParam() auth: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.pedidosService.remove(auth.companyId, id);
   }
 }

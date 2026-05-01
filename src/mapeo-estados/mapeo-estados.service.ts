@@ -12,30 +12,33 @@ export class MapeoEstadosService {
     private readonly mapeoRepo: Repository<MapeoEstado>,
   ) {}
 
-  async create(dto: CreateMapeoEstadoDto): Promise<MapeoEstado> {
-    const mapeo = this.mapeoRepo.create(dto);
+  async create(companyId: number, dto: CreateMapeoEstadoDto): Promise<MapeoEstado> {
+    const mapeo = this.mapeoRepo.create({ ...dto, empresa_id: companyId });
     return this.mapeoRepo.save(mapeo);
   }
 
-  async findAll(): Promise<MapeoEstado[]> {
-    return this.mapeoRepo.find({ order: { estado_unificado: 'ASC' } });
+  async findAll(companyId: number): Promise<MapeoEstado[]> {
+    return this.mapeoRepo.find({
+      where: { empresa_id: companyId },
+      order: { estado_unificado: 'ASC' },
+    });
   }
 
-  async findOne(id: number): Promise<MapeoEstado> {
-    const mapeo = await this.mapeoRepo.findOneBy({ id });
+  async findOne(companyId: number, id: number): Promise<MapeoEstado> {
+    const mapeo = await this.mapeoRepo.findOneBy({ id, empresa_id: companyId });
     if (!mapeo)
       throw new NotFoundException(`MapeoEstado con ID ${id} no encontrado`);
     return mapeo;
   }
 
-  async update(id: number, dto: UpdateMapeoEstadoDto): Promise<MapeoEstado> {
-    const mapeo = await this.findOne(id);
+  async update(companyId: number, id: number, dto: UpdateMapeoEstadoDto): Promise<MapeoEstado> {
+    const mapeo = await this.findOne(companyId, id);
     Object.assign(mapeo, dto);
     return this.mapeoRepo.save(mapeo);
   }
 
-  async remove(id: number): Promise<void> {
-    const mapeo = await this.findOne(id);
+  async remove(companyId: number, id: number): Promise<void> {
+    const mapeo = await this.findOne(companyId, id);
     await this.mapeoRepo.remove(mapeo);
   }
 
@@ -45,6 +48,7 @@ export class MapeoEstadosService {
    * dado (transportadora, estatus_original, ultimo_movimiento) → estado_unificado
    */
   async resolveEstado(
+    companyId: number,
     transportadora: string | null | undefined,
     estatusOriginal: string,
     ultimoMovimiento: string | null | undefined,
@@ -54,7 +58,7 @@ export class MapeoEstadosService {
     const m = (ultimoMovimiento || '').trim();
 
     // Traer todos a memoria y resolver (es una tabla muy pequeña)
-    const todosMapeos = await this.findAll();
+    const todosMapeos = await this.findAll(companyId);
 
     const normStr = (s?: string | null) => {
       if (!s) return '';
@@ -90,11 +94,12 @@ export class MapeoEstadosService {
     return null;
   }
 
-  async bulkUpsert(records: Partial<MapeoEstado>[]): Promise<number> {
+  async bulkUpsert(companyId: number, records: Partial<MapeoEstado>[]): Promise<number> {
     let count = 0;
     for (const record of records) {
       const existing = await this.mapeoRepo.findOne({
         where: {
+          empresa_id: companyId,
           transportadora: record.transportadora || '',
           estatus_original: record.estatus_original || '',
           ultimo_movimiento: record.ultimo_movimiento || '',
@@ -104,7 +109,7 @@ export class MapeoEstadosService {
         Object.assign(existing, record);
         await this.mapeoRepo.save(existing);
       } else {
-        await this.mapeoRepo.save(this.mapeoRepo.create(record));
+        await this.mapeoRepo.save(this.mapeoRepo.create({ ...record, empresa_id: companyId }));
       }
       count++;
     }

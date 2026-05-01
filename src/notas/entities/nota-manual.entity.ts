@@ -6,6 +6,10 @@ export class NotaManual {
   id: number;
 
   @Index()
+  @Column({ type: 'integer', default: 1 })
+  empresa_id: number;
+
+  @Index()
   @Column({ type: 'varchar', length: 50 })
   id_dropi: string;
 

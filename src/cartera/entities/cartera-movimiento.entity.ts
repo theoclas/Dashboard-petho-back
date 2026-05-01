@@ -1,9 +1,13 @@
-import { Entity, Column, PrimaryColumn } from 'typeorm';
+import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
 
 @Entity('cartera_movimientos')
 export class CarteraMovimiento {
   @PrimaryColumn({ type: 'bigint' })
   id: number;
+
+  @Index()
+  @Column({ type: 'integer', default: 1 })
+  empresa_id: number;
 
   @Column({ type: 'timestamp', nullable: true })
   fecha: Date;

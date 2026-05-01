@@ -1,12 +1,15 @@
 import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
 
 @Entity('mapeo_estados')
-@Index(['transportadora', 'estatus_original', 'ultimo_movimiento'], {
+@Index(['empresa_id', 'transportadora', 'estatus_original', 'ultimo_movimiento'], {
   unique: true,
 })
 export class MapeoEstado {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @Column({ type: 'integer', default: 1 })
+  empresa_id: number;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   transportadora: string;

@@ -2,6 +2,7 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  Index,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -10,6 +11,10 @@ import {
 export class Cpa {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @Index()
+  @Column({ type: 'integer', default: 1 })
+  empresa_id: number;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   semana: string;

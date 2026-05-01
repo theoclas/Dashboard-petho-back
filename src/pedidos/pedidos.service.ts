@@ -13,6 +13,7 @@ import {
 
 /** Filtros y orden compartidos entre listado paginado y exportación Excel. */
 export type PedidoListQuery = {
+  companyId?: number;
   estado_unificado?: string;
   transportadora?: string;
   ciudad?: string;
@@ -137,14 +138,15 @@ export class PedidosService {
     }
   }
 
-  async create(createPedidoDto: CreatePedidoDto): Promise<Pedido> {
-    const pedido = this.pedidoRepository.create(createPedidoDto);
+  async create(companyId: number, createPedidoDto: CreatePedidoDto): Promise<Pedido> {
+    const pedido = this.pedidoRepository.create({ ...createPedidoDto, empresa_id: companyId });
     this.calculateFinancials(pedido);
     return this.pedidoRepository.save(pedido);
   }
 
   private createFilteredQueryBuilder(query?: PedidoListQuery): SelectQueryBuilder<Pedido> {
     const qb = this.pedidoRepository.createQueryBuilder('pedido');
+    qb.where('pedido.empresa_id = :companyId', { companyId: query?.companyId ?? 1 });
     this.applyPedidoFilters(qb, query);
     return qb;
   }
@@ -312,8 +314,9 @@ export class PedidosService {
     };
   }
 
-  async getDashboardStats(startDate?: string, endDate?: string) {
+  async getDashboardStats(companyId: number, startDate?: string, endDate?: string) {
     const qb = this.pedidoRepository.createQueryBuilder('pedido');
+    qb.where('pedido.empresa_id = :companyId', { companyId });
 
     if (startDate && endDate) {
       qb.andWhere(sqlCastDateBetween('pedido.fecha'), {
@@ -326,7 +329,12 @@ export class PedidosService {
 
     const productosQb = this.pedidoRepository
       .createQueryBuilder('pedido')
-      .innerJoin('productos_detalle', 'pd', 'pd.pedido_id_dropi = pedido.id_dropi');
+      .innerJoin(
+        'productos_detalle',
+        'pd',
+        'pd.pedido_id_dropi = pedido.id_dropi AND pd.empresa_id = pedido.empresa_id',
+      )
+      .where('pedido.empresa_id = :companyId', { companyId });
     if (startDate && endDate) {
       productosQb.andWhere(sqlCastDateBetween('pedido.fecha'), {
         startDate: extractCalendarDateParam(startDate),
@@ -335,6 +343,7 @@ export class PedidosService {
     }
 
     const guiasDailyQb = this.pedidoRepository.createQueryBuilder('pedido');
+    guiasDailyQb.where('pedido.empresa_id = :companyId', { companyId });
     if (startDate && endDate) {
       guiasDailyQb.andWhere(sqlCastDateBetween('pedido.fecha'), {
         startDate: extractCalendarDateParam(startDate),
@@ -344,7 +353,12 @@ export class PedidosService {
 
     const prodDailyQb = this.pedidoRepository
       .createQueryBuilder('pedido')
-      .innerJoin('productos_detalle', 'pd', 'pd.pedido_id_dropi = pedido.id_dropi');
+      .innerJoin(
+        'productos_detalle',
+        'pd',
+        'pd.pedido_id_dropi = pedido.id_dropi AND pd.empresa_id = pedido.empresa_id',
+      )
+      .where('pedido.empresa_id = :companyId', { companyId });
     if (startDate && endDate) {
       prodDailyQb.andWhere(sqlCastDateBetween('pedido.fecha'), {
         startDate: extractCalendarDateParam(startDate),
@@ -480,22 +494,22 @@ export class PedidosService {
     };
   }
 
-  async findOne(id: number): Promise<Pedido> {
-    const pedido = await this.pedidoRepository.findOneBy({ id });
+  async findOne(companyId: number, id: number): Promise<Pedido> {
+    const pedido = await this.pedidoRepository.findOneBy({ id, empresa_id: companyId });
     if (!pedido) {
       throw new NotFoundException(`Pedido con ID ${id} no encontrado`);
     }
     return pedido;
   }
 
-  async findByDropiId(idDropi: string) {
-    const pedido = await this.pedidoRepository.findOneBy({ id_dropi: idDropi });
+  async findByDropiId(companyId: number, idDropi: string) {
+    const pedido = await this.pedidoRepository.findOneBy({ id_dropi: idDropi, empresa_id: companyId });
     if (!pedido) {
       throw new NotFoundException(`Pedido con id_dropi ${idDropi} no encontrado`);
     }
 
     // Traer los productos relacionados por id_dropi
-    const productos = await this.productosDetalleService.findAll(idDropi);
+    const productos = await this.productosDetalleService.findAll(companyId, idDropi);
 
     return {
       ...pedido,
@@ -503,36 +517,37 @@ export class PedidosService {
     };
   }
 
-  async update(id: number, updatePedidoDto: UpdatePedidoDto): Promise<Pedido> {
-    const pedido = await this.findOne(id);
+  async update(companyId: number, id: number, updatePedidoDto: UpdatePedidoDto): Promise<Pedido> {
+    const pedido = await this.findOne(companyId, id);
     Object.assign(pedido, updatePedidoDto);
     this.calculateFinancials(pedido);
     return this.pedidoRepository.save(pedido);
   }
 
-  async remove(id: number): Promise<void> {
-    const pedido = await this.findOne(id);
+  async remove(companyId: number, id: number): Promise<void> {
+    const pedido = await this.findOne(companyId, id);
     await this.pedidoRepository.remove(pedido);
   }
 
-  async upsertByDropiId(data: Partial<Pedido>): Promise<Pedido> {
+  async upsertByDropiId(companyId: number, data: Partial<Pedido>): Promise<Pedido> {
     const existing = await this.pedidoRepository.findOneBy({
       id_dropi: data.id_dropi,
+      empresa_id: companyId,
     });
     if (existing) {
       Object.assign(existing, data);
       this.calculateFinancials(existing);
       return this.pedidoRepository.save(existing);
     }
-    const pedido = this.pedidoRepository.create(data);
+    const pedido = this.pedidoRepository.create({ ...data, empresa_id: companyId });
     this.calculateFinancials(pedido);
     return this.pedidoRepository.save(pedido);
   }
 
-  async bulkUpsert(records: Partial<Pedido>[]): Promise<number> {
+  async bulkUpsert(companyId: number, records: Partial<Pedido>[]): Promise<number> {
     let count = 0;
     for (const record of records) {
-      await this.upsertByDropiId(record);
+      await this.upsertByDropiId(companyId, record);
       count++;
     }
     return count;
@@ -543,7 +558,7 @@ export class PedidosService {
    * INSERT ... ON CONFLICT (id_dropi) DO UPDATE.
    * De N roundtrips a la BD → ceil(N/500) roundtrips.
    */
-  async bulkUpsertRaw(records: Partial<Pedido>[]): Promise<number> {
+  async bulkUpsertRaw(companyId: number, records: Partial<Pedido>[]): Promise<number> {
     if (!records.length) return 0;
 
     const BATCH_SIZE = 500;
@@ -551,11 +566,15 @@ export class PedidosService {
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
       const batch = records.slice(i, i + BATCH_SIZE);
+      const scopedBatch = batch.map((record) => ({
+        ...record,
+        empresa_id: companyId,
+      }));
       await this.pedidoRepository
         .createQueryBuilder()
         .insert()
         .into(Pedido)
-        .values(batch as Pedido[])
+        .values(scopedBatch as Pedido[])
         .orUpdate(
           [
             'fecha', 'cliente', 'transportadora', 'estado_operativo', 'guia',
@@ -565,7 +584,7 @@ export class PedidosService {
             'hora_ult_mov', 'dias_desde_ult_mov', 'estado_unificado',
             'cartera', 'cartera_aplicada', 'estado_cartera',
           ],
-          ['id_dropi'],
+          ['empresa_id', 'id_dropi'],
         )
         .execute();
       total += batch.length;

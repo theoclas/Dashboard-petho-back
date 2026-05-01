@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module';
 import { CpaModule } from './cpa/cpa.module';
 import { ReportesLogisticaModule } from './reportes-logistica/reportes-logistica.module';
 import { ReportesRentabilidadModule } from './reportes-rentabilidad/reportes-rentabilidad.module';
+import { EmpresasModule } from './empresas/empresas.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ReportesRentabilidadModule } from './reportes-rentabilidad/reportes-ren
     UsersModule,
     AuthModule,
     CpaModule,
+    EmpresasModule,
     ReportesLogisticaModule,
     ReportesRentabilidadModule,
   ],

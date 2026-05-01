@@ -6,6 +6,10 @@ export class ProductoDetalle {
   id: number;
 
   @Index()
+  @Column({ type: 'integer', default: 1 })
+  empresa_id: number;
+
+  @Index()
   @Column({ type: 'varchar', length: 50 })
   pedido_id_dropi: string;
 

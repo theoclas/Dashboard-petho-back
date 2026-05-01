@@ -58,7 +58,7 @@ export class ImportService {
    * Requiere IMPORT_WIPE_SECRET en .env y contraseña idéntica (comparación por hash, timing-safe).
    * No borra: mapeo_estados, notas_manuales, cpas, usuarios.
    */
-  async wipeImportedTables(password: string): Promise<{
+  async wipeImportedTables(companyId: number, password: string): Promise<{
     deleted: {
       productos_detalle: number;
       cartera_movimientos: number;
@@ -68,13 +68,13 @@ export class ImportService {
     this.assertWipePassword(password);
 
     return this.dataSource.transaction(async (manager) => {
-      const nPd = await manager.count(ProductoDetalle);
-      const nCar = await manager.count(CarteraMovimiento);
-      const nPe = await manager.count(Pedido);
+      const nPd = await manager.count(ProductoDetalle, { where: { empresa_id: companyId } });
+      const nCar = await manager.count(CarteraMovimiento, { where: { empresa_id: companyId } });
+      const nPe = await manager.count(Pedido, { where: { empresa_id: companyId } });
 
-      await manager.createQueryBuilder().delete().from(ProductoDetalle).execute();
-      await manager.createQueryBuilder().delete().from(CarteraMovimiento).execute();
-      await manager.createQueryBuilder().delete().from(Pedido).execute();
+      await manager.createQueryBuilder().delete().from(ProductoDetalle).where('empresa_id = :companyId', { companyId }).execute();
+      await manager.createQueryBuilder().delete().from(CarteraMovimiento).where('empresa_id = :companyId', { companyId }).execute();
+      await manager.createQueryBuilder().delete().from(Pedido).where('empresa_id = :companyId', { companyId }).execute();
 
       this.logger.warn(
         `WIPE tablas import: productos_detalle=${nPd}, cartera_movimientos=${nCar}, pedidos=${nPe}`,
@@ -94,19 +94,19 @@ export class ImportService {
    * Elimina todos los registros de la tabla cpas.
    * Usa la misma contraseña que IMPORT_WIPE_SECRET (igual que wipe-imported-tables).
    */
-  async wipeCpaTable(password: string): Promise<{ deleted: number }> {
+  async wipeCpaTable(companyId: number, password: string): Promise<{ deleted: number }> {
     this.assertWipePassword(password);
 
     return this.dataSource.transaction(async (manager) => {
-      const n = await manager.count(Cpa);
-      await manager.createQueryBuilder().delete().from(Cpa).execute();
+      const n = await manager.count(Cpa, { where: { empresa_id: companyId } });
+      await manager.createQueryBuilder().delete().from(Cpa).where('empresa_id = :companyId', { companyId }).execute();
       this.logger.warn(`WIPE tabla cpas: ${n} filas eliminadas`);
       return { deleted: n };
     });
   }
 
-  private async getResolverEnMemoria() {
-    const todosMapeos = await this.mapeoEstadosService.findAll();
+  private async getResolverEnMemoria(companyId: number) {
+    const todosMapeos = await this.mapeoEstadosService.findAll(companyId);
     const normStr = (s?: string | null) => {
       if (!s) return '';
       let text = s.toLowerCase().trim();
@@ -145,6 +145,7 @@ export class ImportService {
    * Elimina el N+1 de cartera cargando todo el mapa de cartera en memoria de una sola vez.
    */
   async importPedidos(
+    companyId: number,
     buffer: Buffer,
   ): Promise<{ imported: number; errors: string[] }> {
     const wb = XLSX.read(buffer, { type: 'buffer' });
@@ -163,7 +164,7 @@ export class ImportService {
     const pedidosParaInsertar: Partial<Pedido>[] = [];
 
     // ══ 1. Cargar mapa de estados EN MEMORIA (1 sola query) ══
-    const resolveEstadoEnMemoria = await this.getResolverEnMemoria();
+    const resolveEstadoEnMemoria = await this.getResolverEnMemoria(companyId);
 
     // ══ 2. Extraer todos los IDs del Excel para hacer 1 sola consulta de cartera ══
     const todosLosIds: string[] = rows
@@ -172,7 +173,7 @@ export class ImportService {
 
     // ══ 3. Cargar TODA la cartera relevante en memoria de UN SOLO GOLPE ══
     this.logger.log(`Cargando mapa de cartera para ${todosLosIds.length} pedidos en una sola query...`);
-    const carteraMap = await this.carteraService.getCarteraMapByOrdenIds(todosLosIds);
+    const carteraMap = await this.carteraService.getCarteraMapByOrdenIds(companyId, todosLosIds);
     this.logger.log(`Mapa de cartera cargado: ${carteraMap.size} entradas.`);
 
     // ══ 4. Procesar todas las filas en memoria (sin tocar la BD) ══
@@ -292,7 +293,7 @@ export class ImportService {
 
     // ══ 5. Enviar TODOS los pedidos a la BD en lotes de 500 ══
     this.logger.log(`Enviando ${pedidosParaInsertar.length} pedidos a la BD en lotes de 500...`);
-    const imported = await this.pedidosService.bulkUpsertRaw(pedidosParaInsertar);
+    const imported = await this.pedidosService.bulkUpsertRaw(companyId, pedidosParaInsertar);
 
     this.logger.log(`Pedidos importados: ${imported}. Errores: ${errors.length}`);
     return { imported, errors };
@@ -303,6 +304,7 @@ export class ImportService {
    * de todos los grupos en el menor número de queries posible.
    */
   async importProductos(
+    companyId: number,
     buffer: Buffer,
   ): Promise<{ imported: number; errors: string[] }> {
     const wb = XLSX.read(buffer, { type: 'buffer' });
@@ -361,14 +363,14 @@ export class ImportService {
         for (let i = 0; i < todosPedidoIds.length; i += DELETE_BATCH) {
           const batch = todosPedidoIds.slice(i, i + DELETE_BATCH);
           await Promise.all(
-            batch.map((id) => this.productosDetalleService.deleteByPedidoDropiId(id)),
+            batch.map((id) => this.productosDetalleService.deleteByPedidoDropiId(companyId, id)),
           );
         }
       }
 
       // 1 solo bulk insert para todos los productos
       if (todosLosProductos.length > 0) {
-        imported = await this.productosDetalleService.bulkInsert(todosLosProductos);
+        imported = await this.productosDetalleService.bulkInsert(companyId, todosLosProductos);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -384,6 +386,7 @@ export class ImportService {
    * y enviándolos en un solo bulk upsert por lotes de 500.
    */
   async importCartera(
+    companyId: number,
     buffer: Buffer,
   ): Promise<{ imported: number; errors: string[] }> {
     const wb = XLSX.read(buffer, { type: 'buffer' });
@@ -430,7 +433,7 @@ export class ImportService {
     }
 
     // Un solo bulk upsert con lotes de 500
-    const imported = await this.carteraService.bulkUpsert(registros);
+    const imported = await this.carteraService.bulkUpsert(companyId, registros);
 
     this.logger.log(`Cartera importada: ${imported}. Errores: ${errors.length}`);
     return { imported, errors };
@@ -441,6 +444,7 @@ export class ImportService {
    * (bulkUpsertFromImport), sin un round-trip a BD por fila.
    */
   async importCpa(
+    companyId: number,
     buffer: Buffer,
   ): Promise<{ imported: number; errors: string[] }> {
     const wb = XLSX.read(buffer, { type: 'buffer' });
@@ -564,7 +568,7 @@ export class ImportService {
       }
     }
 
-    const imported = await this.cpaService.bulkUpsertFromImport(toImport);
+    const imported = await this.cpaService.bulkUpsertFromImport(companyId, toImport);
 
     this.logger.log(`CPA importado: ${imported} registros. Errores de fila: ${errors.length}`);
     return { imported, errors };
@@ -575,6 +579,7 @@ export class ImportService {
    * Importa el archivo de MAPEO DE ESTADOS.
    */
   async importMapeoEstados(
+    companyId: number,
     buffer: Buffer,
   ): Promise<{ imported: number; errors: string[] }> {
     const wb = XLSX.read(buffer, { type: 'buffer' });
@@ -637,7 +642,7 @@ export class ImportService {
 
     let imported = 0;
     if (records.length > 0) {
-      imported = await this.mapeoEstadosService.bulkUpsert(records);
+      imported = await this.mapeoEstadosService.bulkUpsert(companyId, records);
     }
 
     this.logger.log(`Mapeos importados: ${imported}. Errores: ${errors.length}`);
@@ -650,9 +655,9 @@ export class ImportService {
    * - Una query de cartera por lote (`getCarteraMapByOrdenIds`).
    * - Persistencia con `bulkUpsertRaw` (pocos round-trips vs N upserts).
    */
-  async remapearPedidos(): Promise<{ procesados: number; remapeados: number }> {
+  async remapearPedidos(companyId: number): Promise<{ procesados: number; remapeados: number }> {
     const BATCH = 400;
-    const resolveEstadoEnMemoria = await this.getResolverEnMemoria();
+    const resolveEstadoEnMemoria = await this.getResolverEnMemoria(companyId);
 
     const normalizeKey = (text: string): string => {
       let s = text.toLowerCase().trim();
@@ -667,6 +672,7 @@ export class ImportService {
 
     while (true) {
       const { data: pedidosPendientes } = await this.pedidosService.findAll({
+        companyId,
         estado_unificado: 'SIN MAPEAR',
         page: 1,
         limit: BATCH,
@@ -676,7 +682,7 @@ export class ImportService {
 
       batchIndex++;
       const ids = pedidosPendientes.map((p) => p.id_dropi).filter(Boolean);
-      const carteraMap = await this.carteraService.getCarteraMapByOrdenIds(ids);
+      const carteraMap = await this.carteraService.getCarteraMapByOrdenIds(companyId, ids);
 
       const toUpsert: Pedido[] = [];
 
@@ -731,7 +737,7 @@ export class ImportService {
       }
 
       if (toUpsert.length > 0) {
-        await this.pedidosService.bulkUpsertRaw(toUpsert);
+        await this.pedidosService.bulkUpsertRaw(companyId, toUpsert);
       } else if (pedidosPendientes.length > 0) {
         this.logger.warn(
           `Remapeo: ${pedidosPendientes.length} pedidos "SIN MAPEAR" sin coincidencia en mapeo_estados; se detiene para evitar bucle infinito. Revise tablas de mapeo.`,

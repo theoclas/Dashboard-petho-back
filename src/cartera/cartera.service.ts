@@ -11,6 +11,7 @@ export class CarteraService {
   ) {}
 
   async findAll(query?: {
+    companyId: number;
     tipo?: string;
     orden_id?: string;
     page?: number;
@@ -21,6 +22,7 @@ export class CarteraService {
     const skip = (page - 1) * limit;
 
     const qb = this.carteraRepo.createQueryBuilder('c');
+    qb.where('c.empresa_id = :companyId', { companyId: query?.companyId ?? 1 });
 
     if (query?.tipo) {
       qb.andWhere('c.tipo = :tipo', { tipo: query.tipo });
@@ -35,8 +37,8 @@ export class CarteraService {
     return { data, total, page, limit };
   }
 
-  async findOne(id: number): Promise<CarteraMovimiento> {
-    const mov = await this.carteraRepo.findOneBy({ id });
+  async findOne(companyId: number, id: number): Promise<CarteraMovimiento> {
+    const mov = await this.carteraRepo.findOneBy({ id, empresa_id: companyId });
     if (!mov)
       throw new NotFoundException(
         `Movimiento de cartera con ID ${id} no encontrado`,
@@ -44,7 +46,7 @@ export class CarteraService {
     return mov;
   }
 
-  async getCarteraPorPedido(ordenId: string) {
+  async getCarteraPorPedido(companyId: number, ordenId: string) {
     const result = await this.carteraRepo
       .createQueryBuilder('c')
       .select('c.orden_id', 'orden_id')
@@ -52,7 +54,8 @@ export class CarteraService {
         "SUM(CASE WHEN c.tipo = 'ENTRADA' THEN c.monto ELSE -c.monto END)",
         'cartera_neto',
       )
-      .where('c.orden_id = :ordenId', { ordenId })
+      .where('c.empresa_id = :companyId', { companyId })
+      .andWhere('c.orden_id = :ordenId', { ordenId })
       .groupBy('c.orden_id')
       .getRawOne();
 
@@ -64,6 +67,7 @@ export class CarteraService {
    * Devuelve un Map<ordenId, carteraNeto> para lookups O(1) en memoria.
    */
   async getCarteraMapByOrdenIds(
+    companyId: number,
     ordenIds: string[],
   ): Promise<Map<string, number>> {
     const map = new Map<string, number>();
@@ -76,7 +80,8 @@ export class CarteraService {
         "SUM(CASE WHEN c.tipo = 'ENTRADA' THEN c.monto ELSE -c.monto END)",
         'cartera_neto',
       )
-      .where('c.orden_id IN (:...ordenIds)', { ordenIds })
+      .where('c.empresa_id = :companyId', { companyId })
+      .andWhere('c.orden_id IN (:...ordenIds)', { ordenIds })
       .groupBy('c.orden_id')
       .getRawMany();
 
@@ -86,15 +91,16 @@ export class CarteraService {
     return map;
   }
 
-  async upsert(data: Partial<CarteraMovimiento>): Promise<CarteraMovimiento> {
+  async upsert(companyId: number, data: Partial<CarteraMovimiento>): Promise<CarteraMovimiento> {
     const existing = await this.carteraRepo.findOneBy({
       id: data.id as number,
+      empresa_id: companyId,
     });
     if (existing) {
       Object.assign(existing, data);
       return this.carteraRepo.save(existing);
     }
-    const mov = this.carteraRepo.create(data);
+    const mov = this.carteraRepo.create({ ...data, empresa_id: companyId });
     return this.carteraRepo.save(mov);
   }
 
@@ -102,7 +108,7 @@ export class CarteraService {
    * OPTIMIZADO: Inserta/actualiza todos los registros en lotes de 500 usando
    * INSERT ... ON CONFLICT DO UPDATE — una sola operación SQL por lote.
    */
-  async bulkUpsert(records: Partial<CarteraMovimiento>[]): Promise<number> {
+  async bulkUpsert(companyId: number, records: Partial<CarteraMovimiento>[]): Promise<number> {
     if (!records.length) return 0;
 
     const BATCH_SIZE = 500;
@@ -110,11 +116,15 @@ export class CarteraService {
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
       const batch = records.slice(i, i + BATCH_SIZE);
+      const scopedBatch = batch.map((record) => ({
+        ...record,
+        empresa_id: companyId,
+      }));
       await this.carteraRepo
         .createQueryBuilder()
         .insert()
         .into(CarteraMovimiento)
-        .values(batch as CarteraMovimiento[])
+        .values(scopedBatch as CarteraMovimiento[])
         .orUpdate(
           [
             'fecha',
@@ -126,7 +136,7 @@ export class CarteraService {
             'descripcion',
             'concepto_retiro',
           ],
-          ['id'],
+          ['id', 'empresa_id'],
         )
         .execute();
       total += batch.length;

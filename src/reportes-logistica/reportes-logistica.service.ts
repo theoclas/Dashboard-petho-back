@@ -48,6 +48,7 @@ export class ReportesLogisticaService {
   ) {}
 
   async getEfectividadTransportadoras(params: {
+    companyId: number;
     desde?: string;
     hasta?: string;
     transportadora?: string;
@@ -78,7 +79,8 @@ export class ReportesLogisticaService {
         `SUM(CASE WHEN ${bucket} = 'entregado' THEN 1 ELSE 0 END)::int`,
         'entregados',
       )
-      .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''");
+      .where('pedido.empresa_id = :companyId', { companyId: params.companyId })
+      .andWhere("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''");
 
     if (params.desde && params.hasta) {
       qb.andWhere(sqlCastDateBetweenAliases('pedido.fecha', 'desde', 'hasta'), {
@@ -133,13 +135,14 @@ export class ReportesLogisticaService {
     }
   }
 
-  async getCiudadesParaComparativa(params: { desde?: string; hasta?: string }): Promise<string[]> {
+  async getCiudadesParaComparativa(params: { companyId: number; desde?: string; hasta?: string }): Promise<string[]> {
     try {
       const qb = this.pedidoRepository
         .createQueryBuilder('pedido')
         .select('TRIM(pedido.ciudad)', 'c')
         .addSelect('COUNT(*)::int', 'vol')
-        .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+        .where('pedido.empresa_id = :companyId', { companyId: params.companyId })
+        .andWhere("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
         .andWhere("pedido.ciudad IS NOT NULL AND TRIM(pedido.ciudad) <> ''");
 
       if (params.desde && params.hasta) {
@@ -192,6 +195,7 @@ export class ReportesLogisticaService {
   }
 
   async getComparativaGeografica(params: {
+    companyId: number;
     dimension: 'departamento' | 'ciudad';
     metrica: 'efectividad' | 'devolucion';
     top: number;
@@ -223,7 +227,8 @@ export class ReportesLogisticaService {
             `SUM(CASE WHEN ${bucket} = 'devolucion' THEN 1 ELSE 0 END)::int`,
             'devoluciones',
           )
-          .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+          .where('pedido.empresa_id = :companyId', { companyId: params.companyId })
+          .andWhere("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
           .andWhere(`${geoPath} IS NOT NULL AND TRIM(${geoPath}) <> ''`)
           .andWhere('LOWER(TRIM(pedido.ciudad)) = LOWER(TRIM(:cf))', { cf: ciudadFiltro });
 
@@ -267,7 +272,8 @@ export class ReportesLogisticaService {
         .createQueryBuilder('pedido')
         .select(`TRIM(${geoPath})`, 'loc')
         .addSelect('COUNT(*)::int', 'vol')
-        .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+        .where('pedido.empresa_id = :companyId', { companyId: params.companyId })
+        .andWhere("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
         .andWhere(`${geoPath} IS NOT NULL AND TRIM(${geoPath}) <> ''`);
 
       if (params.desde && params.hasta) {
@@ -306,7 +312,8 @@ export class ReportesLogisticaService {
           `SUM(CASE WHEN ${bucket} = 'devolucion' THEN 1 ELSE 0 END)::int`,
           'devoluciones',
         )
-        .where("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
+        .where('pedido.empresa_id = :companyId', { companyId: params.companyId })
+        .andWhere("pedido.transportadora IS NOT NULL AND TRIM(pedido.transportadora) <> ''")
         .andWhere(`TRIM(${geoPath}) IN (:...locs)`, { locs: ubicaciones });
 
       if (params.desde && params.hasta) {

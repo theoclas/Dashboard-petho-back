@@ -18,6 +18,7 @@ import type {
 
 /** Filtros y orden compartidos entre GET /cpa y exportación Excel. */
 export type CpaListQuery = {
+  companyId?: number;
   id?: string;
   semana?: string;
   producto?: string;
@@ -284,27 +285,28 @@ export class CpaService {
     private readonly cpaRepository: Repository<Cpa>,
   ) {}
 
-  create(createCpaDto: CreateCpaDto) {
-    const cpa = this.cpaRepository.create(createCpaDto);
+  create(companyId: number, createCpaDto: CreateCpaDto) {
+    const cpa = this.cpaRepository.create({ ...createCpaDto, empresa_id: companyId });
     applyCpaDerivedFields(cpa);
     return this.cpaRepository.save(cpa);
   }
 
-  async upsert(data: Partial<Cpa>) {
+  async upsert(companyId: number, data: Partial<Cpa>) {
     if (!data.fecha || !String(data.producto ?? '').trim()) {
-      return this.create(data as CreateCpaDto);
+      return this.create(companyId, data as CreateCpaDto);
     }
 
     const prod = String(data.producto).trim();
     const rows = await this.cpaRepository
       .createQueryBuilder('cpa')
       .where('CAST(cpa.fecha AS date) = CAST(:fd AS date)', { fd: data.fecha })
+      .andWhere('cpa.empresa_id = :companyId', { companyId })
       .andWhere('TRIM(cpa.producto) = :prod', { prod })
       .orderBy('cpa.id', 'ASC')
       .getMany();
 
     if (rows.length === 0) {
-      return this.create(data as CreateCpaDto);
+      return this.create(companyId, data as CreateCpaDto);
     }
 
     const primary = rows[0];
@@ -332,7 +334,7 @@ export class CpaService {
    * Import masivo: deduplica por (fecha, producto), carga existentes por lotes
    * y persiste con pocos round-trips (mismo criterio que upsert manual).
    */
-  async bulkUpsertFromImport(records: Partial<Cpa>[]): Promise<number> {
+  async bulkUpsertFromImport(companyId: number, records: Partial<Cpa>[]): Promise<number> {
     if (records.length === 0) return 0;
 
     const merged = new Map<string, Partial<Cpa>>();
@@ -358,6 +360,7 @@ export class CpaService {
               new Brackets((qb2) => {
                 qb2
                   .where(`CAST(cpa.fecha AS date) = CAST(:d${idx} AS date)`, { [`d${idx}`]: r.fecha })
+                  .andWhere('cpa.empresa_id = :companyId', { companyId })
                   .andWhere(`TRIM(cpa.producto) = :p${idx}`, { [`p${idx}`]: String(r.producto ?? '').trim() });
               }),
             );
@@ -394,7 +397,7 @@ export class CpaService {
           applyCpaDerivedFields(hit);
           toSave.push(hit);
         } else {
-          const created = this.cpaRepository.create(r as CreateCpaDto);
+          const created = this.cpaRepository.create({ ...(r as CreateCpaDto), empresa_id: companyId });
           applyCpaDerivedFields(created);
           toSave.push(created);
         }
@@ -487,6 +490,7 @@ export class CpaService {
 
   private createCpaListQueryBuilder(query?: CpaListQuery): SelectQueryBuilder<Cpa> {
     const qb = this.cpaRepository.createQueryBuilder('cpa');
+    qb.where('cpa.empresa_id = :companyId', { companyId: query?.companyId ?? 1 });
     this.applyCpaFilters(qb, query);
     const sortField = query?.sortField || 'fecha';
     const sortOrder = query?.sortOrder === 'ASC' ? 'ASC' : 'DESC';
@@ -557,38 +561,40 @@ export class CpaService {
   }
 
   /** Nombres de producto distintos en CPA (para filtros en UI). */
-  async getDistinctProductos(): Promise<string[]> {
+  async getDistinctProductos(companyId: number): Promise<string[]> {
     const rows = await this.cpaRepository
       .createQueryBuilder('cpa')
       .select('DISTINCT TRIM(cpa.producto)', 'producto')
-      .where("cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''")
+      .where('cpa.empresa_id = :companyId', { companyId })
+      .andWhere("cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''")
       .orderBy('producto', 'ASC')
       .getRawMany<{ producto: string }>();
     return rows.map((r) => String(r.producto ?? '').trim()).filter(Boolean);
   }
 
-  async findOne(id: number) {
-    const cpa = await this.cpaRepository.findOne({ where: { id } });
+  async findOne(companyId: number, id: number) {
+    const cpa = await this.cpaRepository.findOne({ where: { id, empresa_id: companyId } });
     if (!cpa) {
       throw new NotFoundException(`CPA with ID ${id} not found`);
     }
     return cpa;
   }
 
-  async update(id: number, updateCpaDto: UpdateCpaDto) {
-    const cpa = await this.findOne(id);
+  async update(companyId: number, id: number, updateCpaDto: UpdateCpaDto) {
+    const cpa = await this.findOne(companyId, id);
     Object.assign(cpa, updateCpaDto);
     applyCpaDerivedFields(cpa);
     return this.cpaRepository.save(cpa);
   }
 
-  async remove(id: number) {
-    const cpa = await this.findOne(id);
+  async remove(companyId: number, id: number) {
+    const cpa = await this.findOne(companyId, id);
     return this.cpaRepository.remove(cpa);
   }
 
-  async getDashboardStats(startDate?: string, endDate?: string) {
+  async getDashboardStats(companyId: number, startDate?: string, endDate?: string) {
     const qb = this.cpaRepository.createQueryBuilder('cpa');
+    qb.where('cpa.empresa_id = :companyId', { companyId });
 
     if (startDate && endDate) {
       qb.andWhere(sqlCastDateBetween('cpa.fecha'), {
@@ -670,15 +676,17 @@ export class CpaService {
   }
 
   async getResumenDiario(params: {
+    companyId: number;
     startDate?: string;
     endDate?: string;
     producto?: string;
   }): Promise<CpaResumenDiarioResponse> {
-    const { startDate, endDate, producto } = params;
+    const { companyId, startDate, endDate, producto } = params;
     if (!startDate?.trim() || !endDate?.trim()) {
       throw new BadRequestException('startDate y endDate son obligatorios (YYYY-MM-DD).');
     }
     const qb = this.cpaRepository.createQueryBuilder('cpa');
+    qb.where('cpa.empresa_id = :companyId', { companyId });
     qb.andWhere(sqlCastDateBetween('cpa.fecha'), {
       startDate: extractCalendarDateParam(startDate),
       endDate: extractCalendarDateParam(endDate),

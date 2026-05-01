@@ -40,6 +40,7 @@ export class ReportesRentabilidadService {
   constructor(private readonly dataSource: DataSource) {}
 
   async getPorProducto(params: {
+    companyId: number;
     desde?: string;
     hasta?: string;
     page: number;
@@ -93,6 +94,7 @@ export class ReportesRentabilidadService {
       dateCondCpa = `AND ${cpaDate} BETWEEN ${d1}::date AND ${d2}::date`;
     }
 
+    const companyIdPh = push(params.companyId);
     const ilikePh = push(searchPattern);
 
     const metricConds: string[] = [];
@@ -137,7 +139,8 @@ export class ReportesRentabilidadService {
           SUM(COALESCE(cpa.total_facturado, 0))::numeric AS cpa_facturado_total,
           SUM(COALESCE(cpa.utilidad_aproximada, 0))::numeric AS cpa_utilidad_aprox_total
         FROM cpas cpa
-        WHERE cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''
+        WHERE cpa.empresa_id = ${companyIdPh}
+          AND cpa.producto IS NOT NULL AND TRIM(cpa.producto) <> ''
           ${dateCondCpa}
         GROUP BY LOWER(TRIM(cpa.producto))
       ),
@@ -150,7 +153,9 @@ export class ReportesRentabilidadService {
           (${bucketExpr}) AS bucket
         FROM productos_detalle pd
         INNER JOIN pedidos p ON p.id_dropi = pd.pedido_id_dropi
-        WHERE pd.producto_nombre IS NOT NULL AND TRIM(pd.producto_nombre) <> ''
+        WHERE pd.empresa_id = ${companyIdPh}
+          AND p.empresa_id = ${companyIdPh}
+          AND pd.producto_nombre IS NOT NULL AND TRIM(pd.producto_nombre) <> ''
           ${dateCondPedido}
         ORDER BY TRIM(pd.producto_nombre), p.id_dropi, pd.id
       ),

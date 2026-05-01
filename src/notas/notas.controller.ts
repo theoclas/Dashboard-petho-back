@@ -16,6 +16,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
+import { AuthUserParam } from '../auth/decorators/auth-user.decorator';
+import type { AuthUser } from '../auth/auth-user.interface';
 
 @Controller('notas')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -24,32 +26,33 @@ export class NotasController {
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
-  create(@Body() data: Partial<NotaManual>) {
-    return this.notasService.create(data);
+  create(@AuthUserParam() auth: AuthUser, @Body() data: Partial<NotaManual>) {
+    return this.notasService.create(auth.companyId, data);
   }
 
   @Get()
-  findAll(@Query('id_dropi') idDropi?: string) {
-    return this.notasService.findAll(idDropi);
+  findAll(@AuthUserParam() auth: AuthUser, @Query('id_dropi') idDropi?: string) {
+    return this.notasService.findAll(auth.companyId, idDropi);
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.notasService.findOne(id);
+  findOne(@AuthUserParam() auth: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.notasService.findOne(auth.companyId, id);
   }
 
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
   update(
+    @AuthUserParam() auth: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() data: Partial<NotaManual>,
   ) {
-    return this.notasService.update(id, data);
+    return this.notasService.update(auth.companyId, id, data);
   }
 
   @Delete(':id')
   @Roles(UserRole.ADMIN, UserRole.OPERADOR)
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.notasService.remove(id);
+  remove(@AuthUserParam() auth: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.notasService.remove(auth.companyId, id);
   }
 }

@@ -12,6 +12,10 @@ export class Pedido {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
+  @Column({ type: 'integer', default: 1 })
+  empresa_id: number;
+
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 50, nullable: true })
   id_dropi: string;

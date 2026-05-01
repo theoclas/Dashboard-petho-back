@@ -22,7 +22,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user || !user.is_active) {
       throw new UnauthorizedException('Usuario inhabilitado o no existe');
     }
+    if (!payload.companyId) {
+      throw new UnauthorizedException('La sesión no tiene empresa activa.');
+    }
+    const hasCompany = await this.usersService.userHasCompany(payload.sub, payload.companyId);
+    if (!hasCompany) {
+      throw new UnauthorizedException('No tienes acceso a la empresa de esta sesión.');
+    }
     // Retorna datos a request.user
-    return { userId: payload.sub, email: payload.email, role: payload.role };
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      companyId: payload.companyId,
+    };
   }
 }
